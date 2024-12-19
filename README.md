@@ -17,8 +17,8 @@ This project is under active development. Currently implemented:
 - [x] Basic HTTP server framework
 - [x] Processor interface
 - [x] HTTP logs ingestion API endpoint
-- [ ] HTTP metrics ingestion API endpoint
-- [ ] HTTP traces ingestion API endpoint
+- [x] HTTP metrics ingestion API endpoint (with Prometheus support)
+- [x] HTTP traces/spans ingestion API endpoints
 - [ ] CLI for log streaming
 - [ ] Dashboard backend
 - [ ] Real-time frontend
@@ -27,18 +27,8 @@ This project is under active development. Currently implemented:
 
 ## 🛠️ Integration Guide
 
-### 1. As a Log Aggregator
-Pipe any application's stdout to Pulse:
-```bash
-# Monitor Docker containers
-docker logs -f your_container | pulse stream --service docker --env prod
-
-# Development workflow
-python app.py 2>&1 | pulse stream --service payment-api --env dev
-```
-
-### 2. Direct API Integration
-Send structured data via HTTP endpoints:
+### 1. Logging Integration
+Send structured log entries via HTTP:
 ```bash
 # Send log entry
 curl -X POST http://localhost:8080/logs \
@@ -50,14 +40,118 @@ curl -X POST http://localhost:8080/logs \
     "timestamp": "2023-06-15T14:23:10Z",
     "tags": {"user_id": "12345", "method": "oauth"}
   }'
+```
 
-# Send custom metric (coming soon)
+### 2. Metrics Integration
+
+#### JSON Format
+```bash
+# Send custom metric
 curl -X POST http://localhost:8080/metrics \
   -H "Content-Type: application/json" \
   -d '{
     "name": "api.latency",
     "value": 142.7,
+    "type": "gauge",
+    "service": "payment-api",
     "tags": {"endpoint": "/users", "status": "200"}
+  }'
+
+# Send histogram metric
+curl -X POST http://localhost:8080/metrics \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "api.request_duration",
+    "value": 0.237,
+    "type": "histogram",
+    "service": "payment-api",
+    "buckets": [0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+    "tags": {"endpoint": "/transactions"}
+  }'
+```
+
+#### Prometheus Format
+```bash
+# Send metrics in Prometheus text format
+curl -X POST http://localhost:8080/metrics \
+  -H "Content-Type: text/plain" \
+  -d '# HELP http_requests_total The total number of HTTP requests.
+# TYPE http_requests_total counter
+http_requests_total{method="post",code="200",service="api-server"} 1027
+http_requests_total{method="get",code="200",service="api-server"} 9836
+
+# HELP http_request_duration_seconds The HTTP request latencies in seconds.
+# TYPE http_request_duration_seconds gauge
+http_request_duration_seconds{path="/api/users",service="user-service"} 0.043'
+```
+
+#### Scrape Prometheus Metrics
+```bash
+# Scrape metrics in Prometheus format
+curl -X GET http://localhost:8080/metrics
+```
+
+### 3. Distributed Tracing Integration
+
+#### Send Individual Span
+```bash
+# Send an individual span
+curl -X POST http://localhost:8080/spans \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "process_payment",
+    "service": "payment-service",
+    "start_time": "2023-06-15T14:23:10Z",
+    "duration_ms": 127,
+    "status": "OK",
+    "tags": {
+      "user_id": "12345",
+      "payment_id": "pay_78932"
+    }
+  }'
+```
+
+#### Send Complete Trace
+```bash
+# Send a complete trace with multiple spans
+curl -X POST http://localhost:8080/traces \
+  -H "Content-Type: application/json" \
+  -d '{
+    "spans": [
+      {
+        "name": "http_request",
+        "service": "api-gateway",
+        "start_time": "2023-06-15T14:23:10Z",
+        "duration_ms": 254,
+        "status": "OK",
+        "tags": {
+          "http.method": "POST",
+          "http.url": "/api/checkout"
+        }
+      },
+      {
+        "name": "validate_cart",
+        "service": "cart-service",
+        "parent_id": "span-1",
+        "start_time": "2023-06-15T14:23:10.050Z",
+        "duration_ms": 15,
+        "status": "OK",
+        "tags": {
+          "cart_id": "cart_12345"
+        }
+      },
+      {
+        "name": "process_payment",
+        "service": "payment-service",
+        "parent_id": "span-1",
+        "start_time": "2023-06-15T14:23:10.070Z",
+        "duration_ms": 127,
+        "status": "OK",
+        "tags": {
+          "payment_id": "pay_78932"
+        }
+      }
+    ]
   }'
 ```
 
@@ -88,9 +182,10 @@ go build -o pulse ./cmd/pulse
 Currently implemented:
 - `GET /health` - Health check endpoint
 - `POST /logs` - Submit log entries
-- `POST /metrics` - Submit metrics (placeholder)
-- `POST /traces` - Submit traces (placeholder)
-- `POST /spans` - Submit individual spans (placeholder)
+- `POST /metrics` - Submit metrics (JSON or Prometheus format)
+- `GET /metrics` - Scrape metrics in Prometheus format
+- `POST /traces` - Submit complete traces
+- `POST /spans` - Submit individual spans
 
 ## 🧠 Architecture
 
@@ -101,10 +196,29 @@ Pulse follows a clean architecture pattern with:
 - Event processing pipeline in `pkg/processor`
 
 ### Data Flow
-1. Data is ingested through HTTP API or CLI
+1. Data is ingested through HTTP API endpoints
 2. Processor chain processes and enriches the data
 3. Storage system persists the data
-4. Dashboard and API allow querying and visualization (planned)
+4. Metrics and traces can be queried and visualized through APIs
+
+### Observability Data Types
+
+#### Logs
+- **Structure**: Timestamped entries with a message, level, and optional metadata
+- **Storage**: SQLite `logs` table with efficient indexing
+- **Usage**: Debugging, event tracking, audit trails
+
+#### Metrics
+- **Types**: Counter, Gauge, Histogram, Summary
+- **Storage**: SQLite `metrics` and `histogram_metrics` tables
+- **Formats**: JSON and Prometheus exposition format
+- **Aggregation**: Sum, Average, Min, Max, Percentiles (for histograms)
+
+#### Traces
+- **Structure**: Collection of spans forming a request execution path
+- **Correlation**: Trace IDs, Span IDs, and Parent IDs for relationship tracking
+- **Context Propagation**: Via HTTP headers or explicit IDs
+- **Storage**: SQLite `spans` and `traces` tables
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to submit a Pull Request.

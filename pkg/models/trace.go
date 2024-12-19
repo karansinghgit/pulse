@@ -134,8 +134,13 @@ func (t *Trace) AddSpan(span *Span) *Trace {
 	return t
 }
 
-// Generate a simple unique ID for spans and traces
-// In a production system, you would use a more robust ID generation method
+// GenerateID creates a unique ID for spans and traces
+// This is a public function that can be used by external packages
+func GenerateID() string {
+	return generateID()
+}
+
+// generateID is a private function that generates a simple unique ID for spans and traces
 func generateID() string {
 	// Simple generation for demo purposes
 	// In production, use a proper UUID library

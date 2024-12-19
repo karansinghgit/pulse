@@ -42,11 +42,11 @@ func (s *Server) setupRoutes() {
 	s.routes["/logs"] = s.logsHandler()
 
 	// Metric ingestion endpoints
-	s.routes["/metrics"] = s.handleMetrics()
+	s.routes["/metrics"] = s.metricsHandler()
 
 	// Trace ingestion endpoints
-	s.routes["/traces"] = s.handleTraces()
-	s.routes["/spans"] = s.handleSpans()
+	s.routes["/traces"] = s.tracesHandler()
+	s.routes["/spans"] = s.spansHandler()
 }
 
 // Start starts the HTTP server

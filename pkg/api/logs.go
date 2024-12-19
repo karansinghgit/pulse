@@ -29,6 +29,7 @@ type LogResponse struct {
 	Status  string `json:"status"`
 	ID      string `json:"id,omitempty"`
 	Message string `json:"message,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // logsHandler returns a handler for log ingestion
@@ -87,14 +88,29 @@ func (s *Server) logsHandler() http.HandlerFunc {
 		// Create a log entry
 		logEntry := models.NewLogEntry(logReq.Service, logReq.Message, level)
 
+		// Check for trace context in request body or HTTP headers
+		traceID := logReq.TraceID
+		spanID := logReq.SpanID
+
+		// If not in the request body, try to extract from headers
+		if traceID == "" {
+			traceCtx := ExtractTraceContext(r)
+			if traceCtx != nil {
+				traceID = traceCtx.TraceID
+				spanID = traceCtx.SpanID
+			}
+		}
+
+		// Add trace context to log entry
+		if traceID != "" || spanID != "" {
+			logEntry.WithTrace(traceID, spanID)
+		}
+
 		// Add optional fields
 		if logReq.Tags != nil {
 			for k, v := range logReq.Tags {
 				logEntry.AddTag(k, v)
 			}
-		}
-		if logReq.TraceID != "" || logReq.SpanID != "" {
-			logEntry.WithTrace(logReq.TraceID, logReq.SpanID)
 		}
 		if logReq.Env != "" {
 			logEntry.WithEnv(logReq.Env)
@@ -129,6 +145,7 @@ func (s *Server) logsHandler() http.HandlerFunc {
 			Status:  "ok",
 			ID:      logEntry.ID,
 			Message: "Log entry received and processed",
+			TraceID: logEntry.TraceID,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
