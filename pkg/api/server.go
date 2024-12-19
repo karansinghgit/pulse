@@ -94,33 +94,3 @@ func (s *Server) handleHealth() http.HandlerFunc {
 		json.NewEncoder(w).Encode(response)
 	}
 }
-
-// handleMetrics returns a handler for metric ingestion
-func (s *Server) handleMetrics() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// This will be implemented in the next stage with proper request handling
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}
-}
-
-// handleTraces returns a handler for trace ingestion
-func (s *Server) handleTraces() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// This will be implemented in the next stage with proper request handling
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}
-}
-
-// handleSpans returns a handler for span ingestion
-func (s *Server) handleSpans() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// This will be implemented in the next stage with proper request handling
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}
-}
