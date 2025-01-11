@@ -19,9 +19,9 @@ This project is under active development. Currently implemented:
 - [x] HTTP logs ingestion API endpoint
 - [x] HTTP metrics ingestion API endpoint (with Prometheus support)
 - [x] HTTP traces/spans ingestion API endpoints
-- [ ] CLI for log streaming
-- [ ] Dashboard backend
-- [ ] Real-time frontend
+- [x] CLI for log streaming
+- [x] Dashboard backend
+- [x] Dashboard frontend (not real-time yet)
 - [ ] Client libraries
 - [ ] Alerting system
 
