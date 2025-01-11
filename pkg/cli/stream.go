@@ -56,7 +56,7 @@ It supports both plain text and JSON log formats.`,
 	return cmd
 }
 
-func runStream(input io.Reader, serverURL, service, level, format string, tags []string, follow bool, bufferSize int) error {
+func runStream(input io.Reader, serverURL, service, level, format string, tags []string, _ bool, bufferSize int) error {
 	// Parse tags into a map
 	tagMap := make(map[string]string)
 	for _, tag := range tags {
