@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -151,5 +152,69 @@ func (s *Server) logsHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// logsBatchHandler returns a handler for batch log ingestion
+func (s *Server) logsBatchHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Read and decode the request body
+		var logs []models.LogEntry
+		if err := json.NewDecoder(r.Body).Decode(&logs); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Process each log entry
+		for i := range logs {
+			// Generate ID if not provided
+			if logs[i].ID == "" {
+				logs[i].ID = generateID()
+			}
+
+			// Process the log entry
+			if err := s.processor.ProcessLog(&logs[i]); err != nil {
+				http.Error(w, fmt.Sprintf("Error processing log: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Send success response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": fmt.Sprintf("Processed %d log entries", len(logs)),
+		})
+	}
+}
+
+// apiLogsHandler returns a handler for querying logs
+func (s *Server) apiLogsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse query parameters
+		query := parseQueryParams(r)
+
+		// Query logs from storage (add this to the processor interface)
+		logs, err := s.processor.QueryLogs(query)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error querying logs: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Send response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(logs)
 	}
 }

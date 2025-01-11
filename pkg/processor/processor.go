@@ -1,6 +1,8 @@
 package processor
 
 import (
+	"fmt"
+
 	"github.com/karansingh/pulse/pkg/models"
 )
 
@@ -17,6 +19,24 @@ type Processor interface {
 
 	// ProcessTrace processes a complete trace
 	ProcessTrace(trace *models.Trace) error
+
+	// QueryLogs queries logs based on parameters
+	QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error)
+
+	// QueryMetrics queries metrics based on parameters
+	QueryMetrics(query *models.QueryParams) ([]map[string]interface{}, error)
+
+	// QueryTraces queries traces based on parameters
+	QueryTraces(query *models.QueryParams) ([]map[string]interface{}, error)
+
+	// QuerySpans queries spans based on parameters
+	QuerySpans(query *models.QueryParams) ([]map[string]interface{}, error)
+
+	// GetServices returns a list of available services
+	GetServices() ([]string, error)
+
+	// GetStats returns summary statistics
+	GetStats(query *models.QueryParams) (map[string]interface{}, error)
 
 	// Close closes any resources held by the processor
 	Close() error
@@ -63,6 +83,54 @@ func (c Chain) ProcessTrace(trace *models.Trace) error {
 		}
 	}
 	return nil
+}
+
+// QueryLogs queries logs through the first processor in the chain
+func (c Chain) QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].QueryLogs(query)
+}
+
+// QueryMetrics queries metrics through the first processor in the chain
+func (c Chain) QueryMetrics(query *models.QueryParams) ([]map[string]interface{}, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].QueryMetrics(query)
+}
+
+// QueryTraces queries traces through the first processor in the chain
+func (c Chain) QueryTraces(query *models.QueryParams) ([]map[string]interface{}, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].QueryTraces(query)
+}
+
+// QuerySpans queries spans through the first processor in the chain
+func (c Chain) QuerySpans(query *models.QueryParams) ([]map[string]interface{}, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].QuerySpans(query)
+}
+
+// GetServices returns available services through the first processor in the chain
+func (c Chain) GetServices() ([]string, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].GetServices()
+}
+
+// GetStats returns statistics through the first processor in the chain
+func (c Chain) GetStats(query *models.QueryParams) (map[string]interface{}, error) {
+	if len(c) == 0 {
+		return nil, fmt.Errorf("no processors in chain")
+	}
+	return c[0].GetStats(query)
 }
 
 // Close closes all processors in the chain

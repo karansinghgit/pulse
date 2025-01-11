@@ -182,10 +182,24 @@ go build -o pulse ./cmd/pulse
 Currently implemented:
 - `GET /health` - Health check endpoint
 - `POST /logs` - Submit log entries
+- `POST /logs/batch` - Submit multiple log entries
 - `POST /metrics` - Submit metrics (JSON or Prometheus format)
 - `GET /metrics` - Scrape metrics in Prometheus format
 - `POST /traces` - Submit complete traces
 - `POST /spans` - Submit individual spans
+
+Dashboard API:
+- `GET /api/logs` - Query logs with filtering
+- `GET /api/metrics` - Query metrics with filtering
+- `GET /api/traces` - Query traces with filtering
+- `GET /api/spans` - Query spans with filtering
+- `GET /api/services` - Get list of available services
+- `GET /api/stats` - Get summary statistics
+
+WebSocket endpoints:
+- `WS /ws/logs` - Real-time log streaming
+- `WS /ws/metrics` - Real-time metrics streaming
+- `WS /ws/traces` - Real-time traces streaming
 
 ## 🧠 Architecture
 

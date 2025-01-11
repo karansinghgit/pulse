@@ -6,25 +6,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/karansingh/pulse/pkg/processor"
 )
 
 // Server represents the HTTP API server
 type Server struct {
-	server    *http.Server
-	processor processor.Processor
-	port      int
-	routes    map[string]http.HandlerFunc
+	server      *http.Server
+	processor   processor.Processor
+	port        int
+	routes      map[string]http.HandlerFunc
+	wsUpgrader  websocket.Upgrader
+	activeConns map[*websocket.Conn]bool
+	connLock    sync.Mutex
 }
 
 // NewServer creates a new HTTP API server
 func NewServer(processor processor.Processor, port int) *Server {
 	s := &Server{
-		processor: processor,
-		port:      port,
-		routes:    make(map[string]http.HandlerFunc),
+		processor:   processor,
+		port:        port,
+		routes:      make(map[string]http.HandlerFunc),
+		activeConns: make(map[*websocket.Conn]bool),
+		wsUpgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				return true // Allow all origins
+			},
+		},
 	}
 
 	// Register routes
@@ -40,6 +53,7 @@ func (s *Server) setupRoutes() {
 
 	// Log ingestion endpoints
 	s.routes["/logs"] = s.logsHandler()
+	s.routes["/logs/batch"] = s.logsBatchHandler()
 
 	// Metric ingestion endpoints
 	s.routes["/metrics"] = s.metricsHandler()
@@ -47,6 +61,19 @@ func (s *Server) setupRoutes() {
 	// Trace ingestion endpoints
 	s.routes["/traces"] = s.tracesHandler()
 	s.routes["/spans"] = s.spansHandler()
+
+	// Dashboard API endpoints
+	s.routes["/api/logs"] = s.apiLogsHandler()
+	s.routes["/api/metrics"] = s.apiMetricsHandler()
+	s.routes["/api/traces"] = s.apiTracesHandler()
+	s.routes["/api/spans"] = s.apiSpansHandler()
+	s.routes["/api/services"] = s.apiServicesHandler()
+	s.routes["/api/stats"] = s.apiStatsHandler()
+
+	// WebSocket endpoints
+	s.routes["/ws/logs"] = s.wsLogsHandler()
+	s.routes["/ws/metrics"] = s.wsMetricsHandler()
+	s.routes["/ws/traces"] = s.wsTracesHandler()
 }
 
 // Start starts the HTTP server
@@ -72,6 +99,14 @@ func (s *Server) Start() error {
 // Stop gracefully shuts down the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
 	log.Printf("Shutting down API server")
+
+	// Close all WebSocket connections
+	s.connLock.Lock()
+	for conn := range s.activeConns {
+		conn.Close()
+	}
+	s.connLock.Unlock()
+
 	return s.server.Shutdown(ctx)
 }
 
