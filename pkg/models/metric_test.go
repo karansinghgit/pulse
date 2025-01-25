@@ -108,22 +108,24 @@ func TestHistogramMetric(t *testing.T) {
 	}
 
 	// Observe some values
-	metric.Observe(0.05)
-	metric.Observe(0.15)
-	metric.Observe(0.25)
+	metric.Observe(0.003) // Falls into first bucket (0.005)
+	metric.Observe(0.075) // Falls into fifth bucket (0.1)
+	metric.Observe(0.2)   // Falls into sixth bucket (0.25)
 
 	// Count should be 3
 	if metric.Count != 3 {
 		t.Errorf("expected count of 3, got %d", metric.Count)
 	}
 
-	// Sum should be 0.45
-	if metric.Sum != 0.45 {
-		t.Errorf("expected sum of 0.45, got %f", metric.Sum)
+	// Sum should be 0.278
+	expectedSum := 0.003 + 0.075 + 0.2
+	if metric.Sum != expectedSum {
+		t.Errorf("expected sum of %f, got %f", expectedSum, metric.Sum)
 	}
 
 	// Check correct bucket counts
-	expectedCounts := []uint64{3, 3, 3, 3, 2, 1, 0, 0, 0, 0, 0}
+	// Each bucket should reflect cumulative count of observations <= its upper bound
+	expectedCounts := []uint64{1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3}
 	for i, expectedCount := range expectedCounts {
 		if metric.Buckets[i].Count != expectedCount {
 			t.Errorf("expected bucket with upper bound %f to have count %d, got %d",

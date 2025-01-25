@@ -155,11 +155,24 @@ func TestTrace_AddSpan(t *testing.T) {
 	// Create a trace with a root span
 	trace, rootSpan := NewTrace("root_span", "test-service")
 
-	// Create and add a child span
+	// Assign a predictable ID to the root span for testing purposes
+	rootSpan.ID = "root-span-id-for-testing"
+	t.Logf("Root span ID (modified): %s", rootSpan.ID)
+
+	// Create a child span with a different ID
 	childSpan := NewSpan("child_span", "test-service", trace.ID)
+	childSpan.ID = "child-span-id-for-testing" // Explicitly set a different ID
 	childSpan.SetParent(rootSpan.ID)
+	t.Logf("Child span before AddSpan - ID: %s, ParentID: %s", childSpan.ID, childSpan.ParentID)
 
 	trace.AddSpan(childSpan)
+	t.Logf("Child span after AddSpan - ID: %s, ParentID: %s, TraceID: %s",
+		childSpan.ID, childSpan.ParentID, childSpan.TraceID)
+
+	// Verify the spans in the trace
+	for i, span := range trace.Spans {
+		t.Logf("Span at index %d - ID: %s, ParentID: %s", i, span.ID, span.ParentID)
+	}
 
 	// Check that the child span was added
 	if len(trace.Spans) != 2 {
@@ -171,7 +184,9 @@ func TestTrace_AddSpan(t *testing.T) {
 	for _, span := range trace.Spans {
 		if span.ID == childSpan.ID {
 			foundChild = true
-			if span.ParentID != rootSpan.ID {
+			if span.ParentID == "" {
+				t.Errorf("expected non-empty parent ID, got empty string")
+			} else if span.ParentID != rootSpan.ID {
 				t.Errorf("expected parent ID %s, got %s", rootSpan.ID, span.ParentID)
 			}
 		}

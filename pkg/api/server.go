@@ -74,6 +74,10 @@ func (s *Server) setupRoutes() {
 	s.routes["/ws/logs"] = s.wsLogsHandler()
 	s.routes["/ws/metrics"] = s.wsMetricsHandler()
 	s.routes["/ws/traces"] = s.wsTracesHandler()
+
+	// Add static file handler for dashboard
+	// This will serve files from the './dashboard' directory at the /dashboard URL path
+	s.routes["/dashboard"] = http.StripPrefix("/dashboard", http.FileServer(http.Dir("./dashboard"))).ServeHTTP
 }
 
 // Start starts the HTTP server

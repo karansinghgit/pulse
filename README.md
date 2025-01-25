@@ -22,8 +22,25 @@ This project is under active development. Currently implemented:
 - [x] CLI for log streaming
 - [x] Dashboard backend
 - [x] Dashboard frontend (not real-time yet)
+- [x] Demo script for visualization
 - [ ] Client libraries
 - [ ] Alerting system
+
+## 🎮 Demo
+To see Pulse in action with simulated data, run the demo script:
+
+```bash
+# Run the demo
+./scripts/run_demo.sh
+```
+
+This will:
+1. Start the Pulse server
+2. Open the dashboard in your browser
+3. Generate sample metrics, traces, and logs from simulated services
+4. Display the data in real-time on the dashboard
+
+Press Ctrl+C to stop the demo.
 
 ## 🛠️ Integration Guide
 

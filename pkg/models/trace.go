@@ -127,6 +127,7 @@ func NewTrace(rootSpanName string, service string) (*Trace, *Span) {
 
 // AddSpan adds a span to the trace
 func (t *Trace) AddSpan(span *Span) *Trace {
+	// Ensure the span has the correct trace ID but preserve other span attributes
 	if span.TraceID != t.ID {
 		span.TraceID = t.ID
 	}

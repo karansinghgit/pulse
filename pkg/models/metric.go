@@ -113,7 +113,7 @@ func (h *HistogramMetric) Observe(value float64) {
 	h.Sum += value
 	h.Count++
 
-	// Update buckets
+	// Update buckets - increment ONLY buckets where value is <= upper bound
 	for i := range h.Buckets {
 		if value <= h.Buckets[i].UpperBound {
 			h.Buckets[i].Count++
