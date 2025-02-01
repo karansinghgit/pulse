@@ -2,7 +2,7 @@
 
 // Settings
 let settings = {
-    serverUrl: 'http://localhost:8080',
+    serverUrl: window.location.origin,  // Use the current origin instead of hardcoded URL
     refreshRate: 1,
     maxItems: 100,
     isPaused: false
@@ -56,10 +56,15 @@ function initDashboard() {
 function loadSettings() {
     const savedSettings = localStorage.getItem('pulseSettings');
     if (savedSettings) {
-        settings = { ...settings, ...JSON.parse(savedSettings) };
+        try {
+            const parsed = JSON.parse(savedSettings);
+            settings = { ...settings, ...parsed };
+        } catch (error) {
+            console.error('Error parsing saved settings:', error);
+        }
     }
-
-    // Update settings form
+    
+    // Update the settings form with current values
     document.getElementById('server-url').value = settings.serverUrl;
     document.getElementById('refresh-rate').value = settings.refreshRate;
     document.getElementById('max-items').value = settings.maxItems;
@@ -67,67 +72,90 @@ function loadSettings() {
 
 // Save settings to localStorage
 function saveSettings() {
+    // Get values from the form
     settings.serverUrl = document.getElementById('server-url').value;
-    settings.refreshRate = parseInt(document.getElementById('refresh-rate').value);
-    settings.maxItems = parseInt(document.getElementById('max-items').value);
-
-    localStorage.setItem('pulseSettings', JSON.stringify(settings));
-
-    // Reconnect WebSockets with new settings
-    disconnectWebSockets();
-    connectWebSockets();
-
-    alert('Settings saved successfully!');
+    settings.refreshRate = parseInt(document.getElementById('refresh-rate').value, 10) || 1;
+    settings.maxItems = parseInt(document.getElementById('max-items').value, 10) || 100;
+    
+    // Save to localStorage
+    try {
+        localStorage.setItem('pulseSettings', JSON.stringify(settings));
+        alert('Settings saved successfully!');
+        
+        // Reconnect WebSockets if server URL changed
+        disconnectWebSockets();
+        connectWebSockets();
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        alert('Error saving settings: ' + error.message);
+    }
 }
 
 // Set up tab navigation
 function setupTabs() {
+    // Get all tab links
+    const tabLinks = document.querySelectorAll('nav a');
+    
+    // Add click event listeners to each tab link
     tabLinks.forEach(link => {
-        link.addEventListener('click', (e) => {
+        link.addEventListener('click', function(e) {
             e.preventDefault();
-            const tabId = link.getAttribute('data-tab');
-
-            // Update active tab link
-            tabLinks.forEach(l => l.classList.remove('active'));
-            link.classList.add('active');
-
-            // Update active tab content
-            tabContents.forEach(content => {
-                content.classList.remove('active');
-                if (content.id === `${tabId}-tab`) {
-                    content.classList.add('active');
-                }
-            });
-
-            // Update active filters
-            tabFilters.forEach(filter => {
-                filter.classList.remove('active');
-                if (filter.id === `${tabId}-filters`) {
-                    filter.classList.add('active');
-                }
-            });
+            
+            // Get the tab name from the data-tab attribute
+            const tabName = this.getAttribute('data-tab');
+            
+            // Remove active class from all tab links and contents
+            document.querySelectorAll('nav a').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-filters').forEach(el => el.classList.remove('active'));
+            
+            // Add active class to the clicked tab link and corresponding content
+            this.classList.add('active');
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // Show the corresponding filters if they exist
+            const filterEl = document.getElementById(`${tabName}-filters`);
+            if (filterEl) {
+                filterEl.classList.add('active');
+            }
         });
     });
 }
 
 // Set up event listeners
 function setupEventListeners() {
-    // Apply filters button
-    applyFiltersBtn.addEventListener('click', applyFilters);
-
-    // Pause logs button
-    pauseLogsBtn.addEventListener('click', () => {
-        settings.isPaused = !settings.isPaused;
-        pauseLogsBtn.textContent = settings.isPaused ? 'Resume' : 'Pause';
-    });
-
+    // Pause/resume logs button
+    const pauseLogsBtn = document.getElementById('pause-logs');
+    if (pauseLogsBtn) {
+        pauseLogsBtn.addEventListener('click', function() {
+            settings.isPaused = !settings.isPaused;
+            this.textContent = settings.isPaused ? 'Resume' : 'Pause';
+            this.classList.toggle('paused', settings.isPaused);
+        });
+    }
+    
     // Clear logs button
-    clearLogsBtn.addEventListener('click', () => {
-        logsTable.innerHTML = '';
-    });
-
+    const clearLogsBtn = document.getElementById('clear-logs');
+    if (clearLogsBtn) {
+        clearLogsBtn.addEventListener('click', function() {
+            const logsBody = document.getElementById('logs-body');
+            if (logsBody) {
+                logsBody.innerHTML = '';
+            }
+        });
+    }
+    
+    // Apply filters button
+    const applyFiltersBtn = document.getElementById('apply-filters');
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', applyFilters);
+    }
+    
     // Save settings button
-    saveSettingsBtn.addEventListener('click', saveSettings);
+    const saveSettingsBtn = document.getElementById('save-settings');
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', saveSettings);
+    }
 }
 
 // Initialize charts
@@ -208,124 +236,285 @@ function connectWebSockets() {
     connectTracesWebSocket();
 }
 
-// Connect to logs WebSocket
+// Connect to the logs WebSocket
 function connectLogsWebSocket() {
-    const wsUrl = `ws://${settings.serverUrl.replace(/^https?:\/\//, '')}/ws/logs`;
+    // Convert http/https to ws/wss
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/logs`;
+    
     logsSocket = new WebSocket(wsUrl);
-
-    logsSocket.onopen = () => {
+    
+    logsSocket.onopen = function() {
         console.log('Connected to logs WebSocket');
     };
-
-    logsSocket.onmessage = (event) => {
+    
+    logsSocket.onmessage = function(event) {
         if (settings.isPaused) return;
-
-        const data = JSON.parse(event.data);
-        if (data.type === 'logs' && Array.isArray(data.payload)) {
-            data.payload.forEach(log => {
-                addLogToTable(log);
-            });
+        
+        try {
+            const log = JSON.parse(event.data);
+            addLogEntry(log);
+        } catch (error) {
+            console.error('Error parsing log data:', error);
         }
     };
-
-    logsSocket.onerror = (error) => {
+    
+    logsSocket.onclose = function() {
+        console.log('Disconnected from logs WebSocket');
+        // Try to reconnect after a delay
+        setTimeout(connectLogsWebSocket, 3000);
+    };
+    
+    logsSocket.onerror = function(error) {
         console.error('Logs WebSocket error:', error);
     };
-
-    logsSocket.onclose = () => {
-        console.log('Logs WebSocket closed');
-        // Attempt to reconnect after a delay
-        setTimeout(connectLogsWebSocket, 5000);
-    };
 }
 
-// Connect to metrics WebSocket
+// Connect to the metrics WebSocket
 function connectMetricsWebSocket() {
-    const wsUrl = `ws://${settings.serverUrl.replace(/^https?:\/\//, '')}/ws/metrics`;
+    // Convert http/https to ws/wss
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/metrics`;
+    
     metricsSocket = new WebSocket(wsUrl);
-
-    metricsSocket.onopen = () => {
+    
+    metricsSocket.onopen = function() {
         console.log('Connected to metrics WebSocket');
     };
-
-    metricsSocket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'metrics' && Array.isArray(data.payload)) {
-            data.payload.forEach(metric => {
-                addMetricToTable(metric);
-            });
-            updateMetricsChart(data.payload);
+    
+    metricsSocket.onmessage = function(event) {
+        try {
+            const metric = JSON.parse(event.data);
+            updateMetrics(metric);
+        } catch (error) {
+            console.error('Error parsing metric data:', error);
         }
     };
-
-    metricsSocket.onerror = (error) => {
-        console.error('Metrics WebSocket error:', error);
+    
+    metricsSocket.onclose = function() {
+        console.log('Disconnected from metrics WebSocket');
+        // Try to reconnect after a delay
+        setTimeout(connectMetricsWebSocket, 3000);
     };
-
-    metricsSocket.onclose = () => {
-        console.log('Metrics WebSocket closed');
-        // Attempt to reconnect after a delay
-        setTimeout(connectMetricsWebSocket, 5000);
+    
+    metricsSocket.onerror = function(error) {
+        console.error('Metrics WebSocket error:', error);
     };
 }
 
-// Connect to traces WebSocket
+// Connect to the traces WebSocket
 function connectTracesWebSocket() {
-    const wsUrl = `ws://${settings.serverUrl.replace(/^https?:\/\//, '')}/ws/traces`;
+    // Convert http/https to ws/wss
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/traces`;
+    
     tracesSocket = new WebSocket(wsUrl);
-
-    tracesSocket.onopen = () => {
+    
+    tracesSocket.onopen = function() {
         console.log('Connected to traces WebSocket');
     };
-
-    tracesSocket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'traces' && Array.isArray(data.payload)) {
-            data.payload.forEach(trace => {
-                addTraceToTable(trace);
-            });
-            updateTracesChart(data.payload);
+    
+    tracesSocket.onmessage = function(event) {
+        try {
+            const trace = JSON.parse(event.data);
+            updateTraces(trace);
+        } catch (error) {
+            console.error('Error parsing trace data:', error);
         }
     };
-
-    tracesSocket.onerror = (error) => {
-        console.error('Traces WebSocket error:', error);
+    
+    tracesSocket.onclose = function() {
+        console.log('Disconnected from traces WebSocket');
+        // Try to reconnect after a delay
+        setTimeout(connectTracesWebSocket, 3000);
     };
-
-    tracesSocket.onclose = () => {
-        console.log('Traces WebSocket closed');
-        // Attempt to reconnect after a delay
-        setTimeout(connectTracesWebSocket, 5000);
+    
+    tracesSocket.onerror = function(error) {
+        console.error('Traces WebSocket error:', error);
     };
 }
 
 // Disconnect all WebSockets
 function disconnectWebSockets() {
-    if (logsSocket) logsSocket.close();
-    if (metricsSocket) metricsSocket.close();
-    if (tracesSocket) tracesSocket.close();
+    // Close logs WebSocket if it exists
+    if (logsSocket && logsSocket.readyState !== WebSocket.CLOSED) {
+        logsSocket.close();
+        logsSocket = null;
+    }
+    
+    // Close metrics WebSocket if it exists
+    if (metricsSocket && metricsSocket.readyState !== WebSocket.CLOSED) {
+        metricsSocket.close();
+        metricsSocket = null;
+    }
+    
+    // Close traces WebSocket if it exists
+    if (tracesSocket && tracesSocket.readyState !== WebSocket.CLOSED) {
+        tracesSocket.close();
+        tracesSocket = null;
+    }
+    
+    console.log('All WebSocket connections closed');
 }
 
-// Apply filters
+// Apply filters to the data
 function applyFilters() {
-    // Get filter values
-    const service = serviceFilter.value;
-    const time = timeRange.value;
-    const level = document.getElementById('log-level')?.value || '';
-    const search = document.getElementById('log-search')?.value || '';
-    const metricName = document.getElementById('metric-name')?.value || '';
-    const metricType = document.getElementById('metric-type')?.value || '';
-    const traceStatus = document.getElementById('trace-status')?.value || '';
-    const minDuration = document.getElementById('min-duration')?.value || '';
-
-    // Reconnect WebSockets with filters
-    disconnectWebSockets();
-    connectWebSockets();
-
-    // Clear tables
-    logsTable.innerHTML = '';
-    metricsTable.innerHTML = '';
-    tracesTable.innerHTML = '';
+    // Get the active tab
+    const activeTab = document.querySelector('nav a.active').getAttribute('data-tab');
+    
+    // Get common filter values
+    const service = document.getElementById('service-filter').value;
+    const timeRange = document.getElementById('time-range').value;
+    
+    // Build the query parameters
+    let params = new URLSearchParams();
+    if (service) params.append('service', service);
+    if (timeRange) params.append('time_range', timeRange);
+    
+    // Add tab-specific filters
+    if (activeTab === 'logs') {
+        const logLevel = document.getElementById('log-level').value;
+        const logSearch = document.getElementById('log-search').value;
+        
+        if (logLevel) params.append('level', logLevel);
+        if (logSearch) params.append('search', logSearch);
+        
+        // Fetch filtered logs
+        fetch(`${settings.serverUrl}/api/logs?${params.toString()}`)
+            .then(response => response.json())
+            .then(data => {
+                // Clear the logs table
+                const logsBody = document.getElementById('logs-body');
+                if (logsBody) {
+                    logsBody.innerHTML = '';
+                    
+                    // Add each log to the table
+                    data.forEach(log => {
+                        addLogEntry(log);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching logs:', error);
+            });
+    } else if (activeTab === 'metrics') {
+        const metricName = document.getElementById('metric-name').value;
+        const metricType = document.getElementById('metric-type').value;
+        
+        if (metricName) params.append('name', metricName);
+        if (metricType) params.append('type', metricType);
+        
+        // Fetch filtered metrics
+        fetch(`${settings.serverUrl}/api/metrics?${params.toString()}`)
+            .then(response => response.json())
+            .then(data => {
+                // Clear the metrics table
+                const metricsBody = document.getElementById('metrics-body');
+                if (metricsBody) {
+                    metricsBody.innerHTML = '';
+                    
+                    // Add each metric to the table
+                    data.forEach(metric => {
+                        addMetricToTable(metric);
+                    });
+                }
+                
+                // Update the chart with the filtered data
+                if (metricsChart) {
+                    metricsChart.data.datasets = [];
+                    metricsChart.update();
+                    
+                    // Group metrics by name
+                    const metricsByName = {};
+                    data.forEach(metric => {
+                        if (!metricsByName[metric.name]) {
+                            metricsByName[metric.name] = [];
+                        }
+                        metricsByName[metric.name].push(metric);
+                    });
+                    
+                    // Add each metric group to the chart
+                    Object.keys(metricsByName).forEach(name => {
+                        const metrics = metricsByName[name];
+                        const color = getRandomColor();
+                        
+                        const dataset = {
+                            label: name,
+                            data: metrics.map(m => ({
+                                x: new Date(m.timestamp || Date.now()),
+                                y: m.value
+                            })),
+                            borderColor: color,
+                            backgroundColor: color + '33',
+                            fill: false,
+                            tension: 0.1
+                        };
+                        
+                        metricsChart.data.datasets.push(dataset);
+                    });
+                    
+                    metricsChart.update();
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching metrics:', error);
+            });
+    } else if (activeTab === 'traces') {
+        const traceStatus = document.getElementById('trace-status').value;
+        const minDuration = document.getElementById('min-duration').value;
+        
+        if (traceStatus) params.append('status', traceStatus);
+        if (minDuration) params.append('min_duration', minDuration);
+        
+        // Fetch filtered traces
+        fetch(`${settings.serverUrl}/api/traces?${params.toString()}`)
+            .then(response => response.json())
+            .then(data => {
+                // Clear the traces table
+                const tracesBody = document.getElementById('traces-body');
+                if (tracesBody) {
+                    tracesBody.innerHTML = '';
+                    
+                    // Add each trace to the table
+                    data.forEach(trace => {
+                        addTraceToTable(trace);
+                    });
+                }
+                
+                // Update the chart with the filtered data
+                if (tracesChart) {
+                    tracesChart.data.labels = [];
+                    tracesChart.data.datasets[0].data = [];
+                    
+                    // Group traces by name
+                    const tracesByName = {};
+                    data.forEach(trace => {
+                        if (!tracesByName[trace.name]) {
+                            tracesByName[trace.name] = [];
+                        }
+                        tracesByName[trace.name].push(trace);
+                    });
+                    
+                    // Calculate average duration for each trace name
+                    Object.keys(tracesByName).forEach(name => {
+                        const traces = tracesByName[name];
+                        const avgDuration = traces.reduce((sum, trace) => {
+                            const duration = trace.duration_ms || (trace.spans && trace.spans.length > 0 ? 
+                                trace.spans.reduce((max, span) => Math.max(max, span.duration_ms || 0), 0) : 0);
+                            return sum + duration;
+                        }, 0) / traces.length;
+                        
+                        tracesChart.data.labels.push(name);
+                        tracesChart.data.datasets[0].data.push(avgDuration);
+                    });
+                    
+                    tracesChart.update();
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching traces:', error);
+            });
+    }
 }
 
 // Add log to table
@@ -457,6 +646,90 @@ function updateTracesChart(traces) {
     tracesChart.data.labels = services;
     tracesChart.data.datasets[0].data = avgDurations;
     tracesChart.update();
+}
+
+// Add new functions to handle data
+
+// Add a log entry to the logs table
+function addLogEntry(log) {
+    if (!log) return;
+    
+    // Create a new row for the log table
+    const row = document.createElement('tr');
+    
+    // Format timestamp
+    const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleString() : new Date().toLocaleString();
+    
+    // Determine row class based on log level
+    if (log.level) {
+        if (log.level.toUpperCase() === 'ERROR') {
+            row.className = 'error';
+        } else if (log.level.toUpperCase() === 'WARNING' || log.level.toUpperCase() === 'WARN') {
+            row.className = 'warning';
+        }
+    }
+    
+    // Add cells to the row
+    row.innerHTML = `
+        <td>${timestamp}</td>
+        <td>${log.level || 'INFO'}</td>
+        <td>${log.service || 'unknown'}</td>
+        <td>${log.message || ''}</td>
+        <td>${formatTags(log.tags || {})}</td>
+    `;
+    
+    // Add the row to the table
+    const tbody = document.getElementById('logs-body');
+    if (tbody) {
+        // Add the new row at the top of the table
+        tbody.insertBefore(row, tbody.firstChild);
+        
+        // Limit the number of rows
+        while (tbody.children.length > settings.maxItems) {
+            tbody.removeChild(tbody.lastChild);
+        }
+    }
+}
+
+// Update metrics with new data
+function updateMetrics(metric) {
+    if (!metric) return;
+    
+    // Add to metrics table
+    addMetricToTable(metric);
+    
+    // Update metrics chart
+    updateMetricsChart(metric);
+}
+
+// Update traces with new data
+function updateTraces(trace) {
+    if (!trace) return;
+    
+    // Add to traces table
+    addTraceToTable(trace);
+    
+    // Update traces chart
+    updateTracesChart(trace);
+}
+
+// Format tags as a string
+function formatTags(tags) {
+    if (!tags || typeof tags !== 'object') return '';
+    
+    return Object.entries(tags)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(', ');
+}
+
+// Generate a random color
+function getRandomColor() {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
 }
 
 // Initialize the dashboard when the page loads

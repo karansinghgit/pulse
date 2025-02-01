@@ -20,7 +20,7 @@ const (
 	metricsEndpoint = "/api/v1/metrics"
 	tracesEndpoint  = "/api/v1/traces"
 	logsEndpoint    = "/api/v1/logs"
-	dashboardURL    = "http://localhost:8080/dashboard"
+	dashboardURL    = "http://localhost:8080/dashboard/"
 )
 
 // Services we'll simulate

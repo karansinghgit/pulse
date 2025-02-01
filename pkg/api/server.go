@@ -75,9 +75,26 @@ func (s *Server) setupRoutes() {
 	s.routes["/ws/metrics"] = s.wsMetricsHandler()
 	s.routes["/ws/traces"] = s.wsTracesHandler()
 
-	// Add static file handler for dashboard
-	// This will serve files from the './dashboard' directory at the /dashboard URL path
-	s.routes["/dashboard"] = http.StripPrefix("/dashboard", http.FileServer(http.Dir("./dashboard"))).ServeHTTP
+	// Add improved static file handler for dashboard
+	// This will handle both /dashboard and /dashboard/ correctly
+	dashboardHandler := http.StripPrefix("/dashboard", http.FileServer(http.Dir("./dashboard")))
+	s.routes["/dashboard"] = func(w http.ResponseWriter, r *http.Request) {
+		// If path is exactly /dashboard, redirect to /dashboard/ to ensure relative paths work correctly
+		if r.URL.Path == "/dashboard" {
+			http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+			return
+		}
+		dashboardHandler.ServeHTTP(w, r)
+	}
+
+	// Handle dashboard's root path to ensure it loads index.html
+	s.routes["/dashboard/"] = func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dashboard/" {
+			http.ServeFile(w, r, "./dashboard/index.html")
+			return
+		}
+		dashboardHandler.ServeHTTP(w, r)
+	}
 }
 
 // Start starts the HTTP server
