@@ -184,6 +184,143 @@ func (s *SQLiteStorage) SaveLog(log *models.LogEntry) error {
 	return nil
 }
 
+// QueryLogs queries logs from the database based on the given parameters
+func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error) {
+	// Build the SQL query
+	sqlQuery := `
+		SELECT id, timestamp, service, level, message, tags, trace_id, span_id, env, host, source
+		FROM logs
+		WHERE 1=1`
+
+	// Create args slice for parameterized query
+	args := []interface{}{}
+
+	// Add filters based on query parameters
+	if query.Service != "" {
+		sqlQuery += " AND service = ?"
+		args = append(args, query.Service)
+	}
+
+	if query.Level != "" {
+		sqlQuery += " AND level = ?"
+		args = append(args, query.Level)
+	}
+
+	if query.Since.IsZero() == false {
+		sqlQuery += " AND timestamp >= ?"
+		args = append(args, query.Since)
+	}
+
+	if query.Until.IsZero() == false {
+		sqlQuery += " AND timestamp <= ?"
+		args = append(args, query.Until)
+	}
+
+	if query.TraceID != "" {
+		sqlQuery += " AND trace_id = ?"
+		args = append(args, query.TraceID)
+	}
+
+	// Add search filter if provided
+	if query.Search != "" {
+		sqlQuery += " AND (message LIKE ? OR service LIKE ?)"
+		searchTerm := "%" + query.Search + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	// Add order by
+	sqlQuery += " ORDER BY timestamp DESC"
+
+	// Add limit
+	if query.Limit > 0 {
+		sqlQuery += " LIMIT ?"
+		args = append(args, query.Limit)
+	} else {
+		// Default limit to prevent massive result sets
+		sqlQuery += " LIMIT 100"
+	}
+
+	// Execute the query
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query logs: %w", err)
+	}
+	defer rows.Close()
+
+	// Process the results
+	logs := []map[string]interface{}{}
+	for rows.Next() {
+		var (
+			id        string
+			timestamp time.Time
+			service   string
+			level     string
+			message   string
+			tagsJSON  string
+			traceID   sql.NullString
+			spanID    sql.NullString
+			env       sql.NullString
+			host      sql.NullString
+			source    sql.NullString
+		)
+
+		if err := rows.Scan(&id, &timestamp, &service, &level, &message, &tagsJSON, &traceID, &spanID, &env, &host, &source); err != nil {
+			return nil, fmt.Errorf("failed to scan log row: %w", err)
+		}
+
+		// Parse the tags
+		var tags map[string]string
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
+			}
+		}
+
+		// Create the log map
+		logMap := map[string]interface{}{
+			"id":        id,
+			"timestamp": timestamp.Format(time.RFC3339),
+			"service":   service,
+			"level":     level,
+			"message":   message,
+		}
+
+		// Add optional fields if present
+		if tags != nil && len(tags) > 0 {
+			logMap["tags"] = tags
+		}
+
+		if traceID.Valid {
+			logMap["trace_id"] = traceID.String
+		}
+
+		if spanID.Valid {
+			logMap["span_id"] = spanID.String
+		}
+
+		if env.Valid {
+			logMap["env"] = env.String
+		}
+
+		if host.Valid {
+			logMap["host"] = host.String
+		}
+
+		if source.Valid {
+			logMap["source"] = source.String
+		}
+
+		logs = append(logs, logMap)
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating log rows: %w", err)
+	}
+
+	return logs, nil
+}
+
 // SaveMetric saves a metric to the database
 func (s *SQLiteStorage) SaveMetric(metric *models.Metric) error {
 	// Convert tags to JSON
@@ -332,4 +469,369 @@ func (s *SQLiteStorage) SaveTrace(trace *models.Trace) error {
 	}
 
 	return nil
+}
+
+// QueryMetrics queries metrics from storage
+func (s *SQLiteStorage) QueryMetrics(query *models.QueryParams) ([]map[string]interface{}, error) {
+	// Build the SQL query
+	sqlQuery := `
+		SELECT id, timestamp, service, name, value, type, tags
+		FROM metrics
+		WHERE 1=1`
+
+	// Create args slice for parameterized query
+	args := []interface{}{}
+
+	// Add filters based on query parameters
+	if query.Service != "" {
+		sqlQuery += " AND service = ?"
+		args = append(args, query.Service)
+	}
+
+	if query.Since.IsZero() == false {
+		sqlQuery += " AND timestamp >= ?"
+		args = append(args, query.Since)
+	}
+
+	if query.Until.IsZero() == false {
+		sqlQuery += " AND timestamp <= ?"
+		args = append(args, query.Until)
+	}
+
+	// Add search filter if provided
+	if query.Search != "" {
+		sqlQuery += " AND (name LIKE ? OR service LIKE ?)"
+		searchTerm := "%" + query.Search + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	// Add order by
+	sqlQuery += " ORDER BY timestamp DESC"
+
+	// Add limit
+	if query.Limit > 0 {
+		sqlQuery += " LIMIT ?"
+		args = append(args, query.Limit)
+	} else {
+		// Default limit to prevent massive result sets
+		sqlQuery += " LIMIT 100"
+	}
+
+	// Execute the query
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query metrics: %w", err)
+	}
+	defer rows.Close()
+
+	// Process the results
+	metrics := []map[string]interface{}{}
+	for rows.Next() {
+		var (
+			id         string
+			timestamp  time.Time
+			service    string
+			name       string
+			value      float64
+			metricType string
+			tagsJSON   string
+		)
+
+		if err := rows.Scan(&id, &timestamp, &service, &name, &value, &metricType, &tagsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan metric row: %w", err)
+		}
+
+		// Parse the tags
+		var tags map[string]string
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
+			}
+		}
+
+		// Create the metric map
+		metricMap := map[string]interface{}{
+			"id":        id,
+			"timestamp": timestamp.Format(time.RFC3339),
+			"service":   service,
+			"name":      name,
+			"value":     value,
+			"type":      metricType,
+		}
+
+		// Add optional fields if present
+		if tags != nil && len(tags) > 0 {
+			metricMap["tags"] = tags
+		}
+
+		metrics = append(metrics, metricMap)
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating metric rows: %w", err)
+	}
+
+	return metrics, nil
+}
+
+// QueryTraces queries traces from the database based on the given parameters
+func (s *SQLiteStorage) QueryTraces(query *models.QueryParams) ([]map[string]interface{}, error) {
+	// Since traces are collections of spans, we'll query spans and group by trace_id
+	sqlQuery := `
+		SELECT id, trace_id, parent_id, service, name, start_time, duration, status, tags
+		FROM spans
+		WHERE 1=1`
+
+	// Create args slice for parameterized query
+	args := []interface{}{}
+
+	// Add filters based on query parameters
+	if query.Service != "" {
+		sqlQuery += " AND service = ?"
+		args = append(args, query.Service)
+	}
+
+	if query.Since.IsZero() == false {
+		sqlQuery += " AND start_time >= ?"
+		args = append(args, query.Since)
+	}
+
+	if query.Until.IsZero() == false {
+		sqlQuery += " AND start_time <= ?"
+		args = append(args, query.Until)
+	}
+
+	if query.TraceID != "" {
+		sqlQuery += " AND trace_id = ?"
+		args = append(args, query.TraceID)
+	}
+
+	// Add search filter if provided
+	if query.Search != "" {
+		sqlQuery += " AND (name LIKE ? OR service LIKE ?)"
+		searchTerm := "%" + query.Search + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	// Add order by
+	sqlQuery += " ORDER BY start_time DESC"
+
+	// Execute the query
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query spans: %w", err)
+	}
+	defer rows.Close()
+
+	// Group spans by trace ID
+	traceMap := make(map[string]map[string]interface{})
+	for rows.Next() {
+		var (
+			id        string
+			traceID   string
+			parentID  sql.NullString
+			service   string
+			name      string
+			startTime time.Time
+			duration  int64
+			status    string
+			tagsJSON  string
+		)
+
+		if err := rows.Scan(&id, &traceID, &parentID, &service, &name, &startTime, &duration, &status, &tagsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan span row: %w", err)
+		}
+
+		// Parse the tags
+		var tags map[string]string
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
+			}
+		}
+
+		// If this is a root span (no parent), create a trace entry
+		if !parentID.Valid || parentID.String == "" {
+			traceMap[traceID] = map[string]interface{}{
+				"id":          traceID,
+				"start_time":  startTime.Format(time.RFC3339),
+				"service":     service,
+				"name":        name,
+				"duration_ms": duration,
+				"status":      status,
+			}
+
+			// Add tags to the trace
+			if tags != nil && len(tags) > 0 {
+				traceMap[traceID]["tags"] = tags
+			}
+		}
+	}
+
+	// Convert map to array
+	traces := make([]map[string]interface{}, 0, len(traceMap))
+	for _, trace := range traceMap {
+		traces = append(traces, trace)
+	}
+
+	// Apply limit
+	if query.Limit > 0 && len(traces) > query.Limit {
+		traces = traces[:query.Limit]
+	}
+
+	return traces, nil
+}
+
+// QuerySpans queries spans from the database based on the given parameters
+func (s *SQLiteStorage) QuerySpans(query *models.QueryParams) ([]map[string]interface{}, error) {
+	// Build the SQL query
+	sqlQuery := `
+		SELECT id, trace_id, parent_id, service, name, start_time, duration, status, tags
+		FROM spans
+		WHERE 1=1`
+
+	// Create args slice for parameterized query
+	args := []interface{}{}
+
+	// Add filters based on query parameters
+	if query.Service != "" {
+		sqlQuery += " AND service = ?"
+		args = append(args, query.Service)
+	}
+
+	if query.Since.IsZero() == false {
+		sqlQuery += " AND start_time >= ?"
+		args = append(args, query.Since)
+	}
+
+	if query.Until.IsZero() == false {
+		sqlQuery += " AND start_time <= ?"
+		args = append(args, query.Until)
+	}
+
+	if query.TraceID != "" {
+		sqlQuery += " AND trace_id = ?"
+		args = append(args, query.TraceID)
+	}
+
+	// Add search filter if provided
+	if query.Search != "" {
+		sqlQuery += " AND (name LIKE ? OR service LIKE ?)"
+		searchTerm := "%" + query.Search + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	// Add order by
+	sqlQuery += " ORDER BY start_time DESC"
+
+	// Add limit
+	if query.Limit > 0 {
+		sqlQuery += " LIMIT ?"
+		args = append(args, query.Limit)
+	} else {
+		// Default limit to prevent massive result sets
+		sqlQuery += " LIMIT 100"
+	}
+
+	// Execute the query
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query spans: %w", err)
+	}
+	defer rows.Close()
+
+	// Process the results
+	spans := []map[string]interface{}{}
+	for rows.Next() {
+		var (
+			id        string
+			traceID   string
+			parentID  sql.NullString
+			service   string
+			name      string
+			startTime time.Time
+			duration  int64
+			status    string
+			tagsJSON  string
+		)
+
+		if err := rows.Scan(&id, &traceID, &parentID, &service, &name, &startTime, &duration, &status, &tagsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan span row: %w", err)
+		}
+
+		// Parse the tags
+		var tags map[string]string
+		if tagsJSON != "" {
+			if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
+			}
+		}
+
+		// Create the span map
+		spanMap := map[string]interface{}{
+			"id":          id,
+			"trace_id":    traceID,
+			"start_time":  startTime.Format(time.RFC3339),
+			"service":     service,
+			"name":        name,
+			"duration_ms": duration,
+			"status":      status,
+		}
+
+		// Add optional fields if present
+		if parentID.Valid {
+			spanMap["parent_id"] = parentID.String
+		}
+
+		if tags != nil && len(tags) > 0 {
+			spanMap["tags"] = tags
+		}
+
+		spans = append(spans, spanMap)
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating span rows: %w", err)
+	}
+
+	return spans, nil
+}
+
+// GetServices returns a list of all unique service names
+func (s *SQLiteStorage) GetServices() ([]string, error) {
+	// Query unique services from logs, metrics, and spans
+	sqlQuery := `
+		SELECT DISTINCT service FROM (
+			SELECT service FROM logs
+			UNION
+			SELECT service FROM metrics
+			UNION
+			SELECT service FROM spans
+		) ORDER BY service
+	`
+
+	rows, err := s.db.Query(sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query services: %w", err)
+	}
+	defer rows.Close()
+
+	// Process the results
+	services := []string{}
+	for rows.Next() {
+		var service string
+		if err := rows.Scan(&service); err != nil {
+			return nil, fmt.Errorf("failed to scan service row: %w", err)
+		}
+		services = append(services, service)
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating service rows: %w", err)
+	}
+
+	return services, nil
 }

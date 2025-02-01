@@ -24,6 +24,9 @@ type QueryParams struct {
 	OrderBy   string            // Field to order by
 	OrderDesc bool              // True for descending order
 	Offset    int               // For pagination
+	Level     string            // Level to filter by
+	TraceID   string            // Trace ID to filter by
+	Search    string            // Search term
 }
 
 // WSMessage represents a message sent over WebSocket
@@ -51,95 +54,148 @@ func uuidMini() string {
 
 // parseQueryParams extracts query parameters from an HTTP request
 func parseQueryParams(r *http.Request) *models.QueryParams {
-	q := r.URL.Query()
-	params := &models.QueryParams{
-		Service:   q.Get("service"),
-		OrderBy:   q.Get("order_by"),
-		OrderDesc: q.Get("order") == "desc",
-		Filters:   make(map[string]string),
+	log.Printf("Parsing query parameters from request: %s", r.URL.String())
+
+	// Parse query parameters
+	query := &models.QueryParams{
+		Limit: 100, // Default limit
 	}
 
-	// Parse limit
-	if limitStr := q.Get("limit"); limitStr != "" {
+	// Get service filter
+	service := r.URL.Query().Get("service")
+	if service != "" {
+		query.Service = service
+		log.Printf("Filtering by service: %s", service)
+	}
+
+	// Get level filter (for logs)
+	level := r.URL.Query().Get("level")
+	if level != "" {
+		query.Level = level
+		log.Printf("Filtering by level: %s", level)
+	}
+
+	// Get trace ID filter
+	traceID := r.URL.Query().Get("trace_id")
+	if traceID != "" {
+		query.TraceID = traceID
+		log.Printf("Filtering by trace ID: %s", traceID)
+	}
+
+	// Get search filter
+	search := r.URL.Query().Get("search")
+	if search != "" {
+		query.Search = search
+		log.Printf("Filtering by search term: %s", search)
+	}
+
+	// Get limit
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err == nil && limit > 0 {
-			params.Limit = limit
-		} else {
-			params.Limit = 100 // Default limit
+			query.Limit = limit
+			log.Printf("Using limit: %d", limit)
 		}
-	} else {
-		params.Limit = 100 // Default limit
 	}
 
-	// Parse offset
-	if offsetStr := q.Get("offset"); offsetStr != "" {
+	// Get time range
+	timeRange := r.URL.Query().Get("time_range")
+	if timeRange != "" {
+		log.Printf("Using time range: %s", timeRange)
+
+		// Parse the time range (e.g., "1h", "30m", "1d")
+		duration, err := parseDuration(timeRange)
+		if err == nil {
+			query.Since = time.Now().Add(-duration)
+			log.Printf("Calculated since time: %s", query.Since)
+		} else {
+			log.Printf("Error parsing time range: %v", err)
+		}
+	} else {
+		// Default to last hour if no time range specified
+		query.Since = time.Now().Add(-1 * time.Hour)
+		log.Printf("Using default time range (1h), since: %s", query.Since)
+	}
+
+	// Get explicit since time
+	sinceStr := r.URL.Query().Get("since")
+	if sinceStr != "" {
+		since, err := time.Parse(time.RFC3339, sinceStr)
+		if err == nil {
+			query.Since = since
+			log.Printf("Using explicit since time: %s", since)
+		} else {
+			log.Printf("Error parsing since time: %v", err)
+		}
+	}
+
+	// Get explicit until time
+	untilStr := r.URL.Query().Get("until")
+	if untilStr != "" {
+		until, err := time.Parse(time.RFC3339, untilStr)
+		if err == nil {
+			query.Until = until
+			log.Printf("Using explicit until time: %s", until)
+		} else {
+			log.Printf("Error parsing until time: %v", err)
+		}
+	}
+
+	// Get order by
+	orderBy := r.URL.Query().Get("order_by")
+	if orderBy != "" {
+		query.OrderBy = orderBy
+		log.Printf("Ordering by: %s", orderBy)
+	}
+
+	// Get order direction
+	orderDesc := r.URL.Query().Get("order_desc")
+	if orderDesc == "true" {
+		query.OrderDesc = true
+		log.Printf("Using descending order")
+	}
+
+	// Get offset for pagination
+	offsetStr := r.URL.Query().Get("offset")
+	if offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
 		if err == nil && offset >= 0 {
-			params.Offset = offset
-		}
-	}
-
-	// Parse time ranges
-	now := time.Now()
-
-	// Parse 'since' parameter (e.g., "1h", "30m", "1d")
-	if sinceStr := q.Get("since"); sinceStr != "" {
-		if duration, err := parseDuration(sinceStr); err == nil {
-			params.Since = now.Add(-duration)
+			query.Offset = offset
+			log.Printf("Using offset: %d", offset)
 		} else {
-			// Try parsing as RFC3339
-			if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
-				params.Since = t
-			} else {
-				params.Since = now.Add(-time.Hour) // Default to 1 hour ago
-			}
-		}
-	} else {
-		params.Since = now.Add(-time.Hour) // Default to 1 hour ago
-	}
-
-	// Parse 'until' parameter
-	if untilStr := q.Get("until"); untilStr != "" {
-		if duration, err := parseDuration(untilStr); err == nil {
-			params.Until = now.Add(-duration)
-		} else {
-			// Try parsing as RFC3339
-			if t, err := time.Parse(time.RFC3339, untilStr); err == nil {
-				params.Until = t
-			} else {
-				params.Until = now // Default to now
-			}
-		}
-	} else {
-		params.Until = now // Default to now
-	}
-
-	// Parse filters (format: key=value or key:*value*)
-	for _, filter := range q["filter"] {
-		// Handle both equals and contains operators
-		if strings.Contains(filter, "=") {
-			parts := strings.SplitN(filter, "=", 2)
-			if len(parts) == 2 {
-				params.Filters[parts[0]] = parts[1]
-			}
-		} else if strings.Contains(filter, ":") {
-			parts := strings.SplitN(filter, ":", 2)
-			if len(parts) == 2 {
-				// Prefix with ~ to indicate pattern matching
-				params.Filters[parts[0]] = "~" + parts[1]
-			}
+			log.Printf("Error parsing offset: %v", err)
 		}
 	}
 
-	return params
+	// Parse additional filters
+	for key, values := range r.URL.Query() {
+		if strings.HasPrefix(key, "filter.") && len(values) > 0 {
+			filterName := strings.TrimPrefix(key, "filter.")
+			if query.Filters == nil {
+				query.Filters = make(map[string]string)
+			}
+			query.Filters[filterName] = values[0]
+			log.Printf("Added filter %s: %s", filterName, values[0])
+		}
+	}
+
+	log.Printf("Final query parameters: %+v", query)
+	return query
 }
 
-// parseDuration parses a human-readable duration like "30m", "1h", "1d"
+// parseDuration parses duration strings like "5m", "1h", "7d"
 func parseDuration(s string) (time.Duration, error) {
-	// Convert days to hours for simplicity
-	s = strings.ReplaceAll(s, "d", "h*24")
+	// Handle special case for days
+	if strings.HasSuffix(s, "d") {
+		days, err := strconv.Atoi(s[:len(s)-1])
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
 
-	// Try to parse the standard duration format
+	// Otherwise, use the standard Go time.ParseDuration
 	return time.ParseDuration(s)
 }
 
@@ -363,6 +419,8 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	log.Printf("Starting log streaming with query: %+v", query)
+
 	// Read control messages from client
 	go func() {
 		for {
@@ -376,11 +434,17 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 	// Initial query
 	logs, err := s.processor.QueryLogs(query)
 	if err == nil {
+		log.Printf("Initial query returned %d logs", len(logs))
 		message := WSMessage{
 			Type:    "logs",
 			Payload: logs,
 		}
-		conn.WriteJSON(message)
+		if err := conn.WriteJSON(message); err != nil {
+			log.Printf("Error sending initial logs: %v", err)
+			return
+		}
+	} else {
+		log.Printf("Error in initial logs query: %v", err)
 	}
 
 	// Send updates
@@ -397,6 +461,8 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 				continue
 			}
 
+			log.Printf("Found %d new logs", len(logs))
+
 			if len(logs) > 0 {
 				message := WSMessage{
 					Type:    "logs",
@@ -406,6 +472,7 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 					log.Printf("Error sending logs: %v", err)
 					return
 				}
+				log.Printf("Sent %d logs to client", len(logs))
 			}
 		}
 	}
@@ -415,6 +482,8 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+
+	log.Printf("Starting metrics streaming with query: %+v", query)
 
 	// Read control messages from client
 	go func() {
@@ -429,11 +498,17 @@ func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) 
 	// Initial query
 	metrics, err := s.processor.QueryMetrics(query)
 	if err == nil {
+		log.Printf("Initial query returned %d metrics", len(metrics))
 		message := WSMessage{
 			Type:    "metrics",
 			Payload: metrics,
 		}
-		conn.WriteJSON(message)
+		if err := conn.WriteJSON(message); err != nil {
+			log.Printf("Error sending initial metrics: %v", err)
+			return
+		}
+	} else {
+		log.Printf("Error in initial metrics query: %v", err)
 	}
 
 	// Send updates
@@ -450,6 +525,8 @@ func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) 
 				continue
 			}
 
+			log.Printf("Found %d new metrics", len(metrics))
+
 			if len(metrics) > 0 {
 				message := WSMessage{
 					Type:    "metrics",
@@ -459,6 +536,7 @@ func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) 
 					log.Printf("Error sending metrics: %v", err)
 					return
 				}
+				log.Printf("Sent %d metrics to client", len(metrics))
 			}
 		}
 	}

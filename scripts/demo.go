@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -60,25 +63,128 @@ func randomStatusCode() int {
 
 // Send a metric to the Pulse server
 func sendMetric(metric *models.Metric) error {
-	// In a real implementation, this would serialize the metric and send it to the server
-	// For demo purposes, we'll just print it
+	// Print message to console
 	fmt.Printf("Sending metric: %s = %.2f (%s)\n", metric.Name, metric.Value, metric.Type)
+
+	// Convert Metric to the expected MetricRequest format
+	metricRequest := struct {
+		Name      string            `json:"name"`                // Metric name (e.g., "http.requests")
+		Value     float64           `json:"value"`               // The measured value
+		Type      string            `json:"type,omitempty"`      // Type of metric (counter, gauge, histogram)
+		Service   string            `json:"service"`             // Service or application name
+		Timestamp string            `json:"timestamp,omitempty"` // Optional timestamp in RFC3339 format
+		Tags      map[string]string `json:"tags,omitempty"`      // Dimensions for the metric
+		TraceID   string            `json:"trace_id,omitempty"`  // Optional trace ID for correlation
+		Env       string            `json:"env,omitempty"`       // Environment (prod, dev, staging, etc.)
+		Host      string            `json:"host,omitempty"`      // Hostname where the metric was generated
+	}{
+		Name:      metric.Name,
+		Value:     metric.Value,
+		Type:      string(metric.Type),
+		Service:   metric.Service,
+		Timestamp: metric.Timestamp.Format(time.RFC3339),
+		Tags:      metric.Tags,
+		TraceID:   metric.TraceID,
+		Env:       metric.Env,
+		Host:      metric.Host,
+	}
+
+	// Serialize the metric request to JSON
+	jsonData, err := json.Marshal(metricRequest)
+	if err != nil {
+		return fmt.Errorf("error serializing metric: %v", err)
+	}
+
+	// Send to server
+	resp, err := http.Post(pulseServerURL+"/metrics", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("error sending metric: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned error: %d - %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
 // Send a trace to the Pulse server
 func sendTrace(trace *models.Trace) error {
-	// In a real implementation, this would serialize the trace and send it to the server
-	// For demo purposes, we'll just print it
+	// Print message to console
 	fmt.Printf("Sending trace: %s with %d spans\n", trace.ID, len(trace.Spans))
+
+	// Create a simplified trace request from the trace model
+	// We're directly serializing the trace as it has the same structure as expected by the API
+	jsonData, err := json.Marshal(trace)
+	if err != nil {
+		return fmt.Errorf("error serializing trace: %v", err)
+	}
+
+	// Send to server
+	resp, err := http.Post(pulseServerURL+"/traces", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("error sending trace: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned error: %d - %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
 // Send a log entry to the Pulse server
 func sendLog(logEntry *models.LogEntry) error {
-	// In a real implementation, this would serialize the log and send it to the server
-	// For demo purposes, we'll just print it
+	// Print message to console
 	fmt.Printf("Sending log: [%s] %s\n", logEntry.Level, logEntry.Message)
+
+	// Convert LogEntry to the expected LogRequest format
+	logRequest := struct {
+		Message   string            `json:"message"`
+		Level     string            `json:"level"`
+		Service   string            `json:"service"`
+		Timestamp string            `json:"timestamp,omitempty"`
+		Tags      map[string]string `json:"tags,omitempty"`
+		TraceID   string            `json:"trace_id,omitempty"`
+		SpanID    string            `json:"span_id,omitempty"`
+		Env       string            `json:"env,omitempty"`
+		Host      string            `json:"host,omitempty"`
+		Source    string            `json:"source,omitempty"`
+	}{
+		Message:   logEntry.Message,
+		Level:     string(logEntry.Level),
+		Service:   logEntry.Service,
+		Timestamp: logEntry.Timestamp.Format(time.RFC3339),
+		Tags:      logEntry.Tags,
+		TraceID:   logEntry.TraceID,
+		SpanID:    logEntry.SpanID,
+		Env:       logEntry.Env,
+		Host:      logEntry.Host,
+		Source:    logEntry.Source,
+	}
+
+	// Serialize the log request to JSON
+	jsonData, err := json.Marshal(logRequest)
+	if err != nil {
+		return fmt.Errorf("error serializing log: %v", err)
+	}
+
+	// Send to server
+	resp, err := http.Post(pulseServerURL+"/logs", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("error sending log: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned error: %d - %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
