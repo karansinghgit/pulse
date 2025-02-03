@@ -1,21 +1,17 @@
-// Dashboard JavaScript
+// Dashboard JavaScript - Main Entry Point
+import SettingsModule from './modules/settings.js';
+import WebSocketsModule from './modules/websockets.js';
+import ChartsModule from './modules/charts.js';
+import Utils from './modules/utils.js';
 
-// Settings
-let settings = {
-    serverUrl: window.location.origin,  // Use the current origin instead of hardcoded URL
-    refreshRate: 1,
-    maxItems: 1000,
-    isPaused: false
-};
+// Pagination variables
+let logEntries = [];
+let currentPage = 1;
+let pageSize = 50;
+let totalPages = 1;
 
-// WebSocket connections
-let logsSocket = null;
-let metricsSocket = null;
-let tracesSocket = null;
-
-// Charts
-let metricsChart = null;
-let tracesChart = null;
+// Current active tab
+let activeTab = 'logs';
 
 // DOM Elements
 const tabLinks = document.querySelectorAll('nav a');
@@ -36,7 +32,10 @@ function initDashboard() {
     console.log('Initializing dashboard...');
     
     // Load stored settings
-    loadSettings();
+    const settings = SettingsModule.load();
+    
+    // Read route from URL hash
+    parseRoute();
     
     // Set up event listeners
     setupEventListeners();
@@ -47,58 +46,46 @@ function initDashboard() {
     // Initialize charts
     try {
         console.log('Initializing charts...');
-        initCharts();
+        ChartsModule.init();
         console.log('Charts initialized successfully');
     } catch (error) {
         console.error('Error initializing charts:', error);
     }
     
     // Load services for filter dropdowns
-    loadServices();
+    Utils.loadServices(settings.serverUrl);
+    
+    // Set up WebSocket message handlers
+    WebSocketsModule.setMessageHandlers({
+        logs: addLogEntry,
+        metrics: updateMetrics,
+        traces: updateTraces
+    });
     
     // Connect WebSockets
-    connectWebSockets();
+    WebSocketsModule.connect(SettingsModule.get());
     
     console.log('Dashboard initialization complete');
 }
 
-// Load settings from localStorage
-function loadSettings() {
-    const savedSettings = localStorage.getItem('pulseSettings');
-    if (savedSettings) {
-        try {
-            const parsed = JSON.parse(savedSettings);
-            settings = { ...settings, ...parsed };
-        } catch (error) {
-            console.error('Error parsing saved settings:', error);
-        }
+// Parse the route from URL hash
+function parseRoute() {
+    const hash = window.location.hash.substring(1); // Remove the # symbol
+    if (hash && ['logs', 'metrics', 'traces', 'settings'].includes(hash)) {
+        activeTab = hash;
+        console.log('Route set to:', activeTab);
+    } else {
+        // Default to logs if no valid hash found
+        activeTab = 'logs';
+        // Set the URL hash to the default tab
+        window.location.hash = activeTab;
     }
-    
-    // Update the settings form with current values
-    document.getElementById('server-url').value = settings.serverUrl;
-    document.getElementById('refresh-rate').value = settings.refreshRate;
-    document.getElementById('max-items').value = settings.maxItems;
 }
 
-// Save settings to localStorage
-function saveSettings() {
-    // Get values from the form
-    settings.serverUrl = document.getElementById('server-url').value;
-    settings.refreshRate = parseInt(document.getElementById('refresh-rate').value, 10) || 1;
-    settings.maxItems = parseInt(document.getElementById('max-items').value, 10) || 1000;
-    
-    // Save to localStorage
-    try {
-        localStorage.setItem('pulseSettings', JSON.stringify(settings));
-        alert('Settings saved successfully!');
-        
-        // Reconnect WebSockets if server URL changed
-        disconnectWebSockets();
-        connectWebSockets();
-    } catch (error) {
-        console.error('Error saving settings:', error);
-        alert('Error saving settings: ' + error.message);
-    }
+// Update the URL hash when tab changes
+function updateRoute(tabName) {
+    window.location.hash = tabName;
+    activeTab = tabName;
 }
 
 // Set up tab navigation
@@ -114,22 +101,37 @@ function setupTabs() {
             // Get the tab name from the data-tab attribute
             const tabName = this.getAttribute('data-tab');
             
-            // Remove active class from all tab links and contents
-            document.querySelectorAll('nav a').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-filters').forEach(el => el.classList.remove('active'));
+            // Update the URL route
+            updateRoute(tabName);
             
-            // Add active class to the clicked tab link and corresponding content
-            this.classList.add('active');
-            document.getElementById(`${tabName}-tab`).classList.add('active');
-            
-            // Show the corresponding filters if they exist
-            const filterEl = document.getElementById(`${tabName}-filters`);
-            if (filterEl) {
-                filterEl.classList.add('active');
-            }
+            // Switch to the selected tab
+            switchToTab(tabName);
         });
     });
+    
+    // Set the initial active tab based on the route
+    switchToTab(activeTab);
+}
+
+// Switch to a specific tab
+function switchToTab(tabName) {
+    // Remove active class from all tab links and contents
+    document.querySelectorAll('nav a').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-filters').forEach(el => el.classList.remove('active'));
+    
+    // Add active class to the specified tab link and corresponding content
+    const tabLink = document.querySelector(`nav a[data-tab="${tabName}"]`);
+    if (tabLink) tabLink.classList.add('active');
+    
+    const tabContent = document.getElementById(`${tabName}-tab`);
+    if (tabContent) tabContent.classList.add('active');
+    
+    // Show the corresponding filters if they exist
+    const filterEl = document.getElementById(`${tabName}-filters`);
+    if (filterEl) {
+        filterEl.classList.add('active');
+    }
 }
 
 // Set up event listeners
@@ -138,7 +140,9 @@ function setupEventListeners() {
     const pauseLogsBtn = document.getElementById('pause-logs');
     if (pauseLogsBtn) {
         pauseLogsBtn.addEventListener('click', function() {
+            const settings = SettingsModule.get();
             settings.isPaused = !settings.isPaused;
+            SettingsModule.update('isPaused', settings.isPaused);
             this.textContent = settings.isPaused ? 'Resume' : 'Pause';
             this.classList.toggle('paused', settings.isPaused);
         });
@@ -151,842 +155,166 @@ function setupEventListeners() {
             const logsBody = document.getElementById('logs-body');
             if (logsBody) {
                 logsBody.innerHTML = '';
+                logEntries = [];
+                updatePagination();
             }
+        });
+    }
+    
+    // Pagination controls
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const pageSizeSelect = document.getElementById('page-size');
+    
+    if (prevPageBtn) {
+        prevPageBtn.addEventListener('click', function() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderCurrentPage();
+            }
+        });
+    }
+    
+    if (nextPageBtn) {
+        nextPageBtn.addEventListener('click', function() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderCurrentPage();
+            }
+        });
+    }
+    
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', function() {
+            pageSize = parseInt(this.value, 10);
+            currentPage = 1; // Reset to first page when changing page size
+            updatePagination();
+            renderCurrentPage();
         });
     }
     
     // Apply filters button
     const applyFiltersBtn = document.getElementById('apply-filters');
     if (applyFiltersBtn) {
-        applyFiltersBtn.addEventListener('click', applyFilters);
+        applyFiltersBtn.addEventListener('click', function() {
+            applyFilters();
+        });
     }
     
     // Save settings button
     const saveSettingsBtn = document.getElementById('save-settings');
     if (saveSettingsBtn) {
-        saveSettingsBtn.addEventListener('click', saveSettings);
-    }
-}
-
-// Initialize charts
-function initCharts() {
-    // Ensure Chart.js has the proper date adapter
-    try {
-        // Metrics chart
-        const metricsCtx = document.getElementById('metrics-chart').getContext('2d');
-        metricsChart = new Chart(metricsCtx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: []
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            unit: 'minute',
-                            tooltipFormat: 'PPpp' // Localized format with date and time
-                        },
-                        adapters: {
-                            date: {
-                                locale: 'en-US'
-                            }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    }
-                }
+        saveSettingsBtn.addEventListener('click', function() {
+            if (SettingsModule.save()) {
+                // Reconnect WebSockets if server URL changed
+                WebSocketsModule.disconnect();
+                WebSocketsModule.connect(SettingsModule.get());
             }
         });
-
-        // Traces chart
-        const tracesCtx = document.getElementById('traces-chart').getContext('2d');
-        tracesChart = new Chart(tracesCtx, {
-            type: 'bar',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Average Duration (ms)',
-                    data: [],
-                    backgroundColor: '#3498db'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            unit: 'minute',
-                            tooltipFormat: 'PPpp' // Localized format with date and time
-                        },
-                        adapters: {
-                            date: {
-                                locale: 'en-US'
-                            }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    }
-                }
-            }
-        });
-    } catch (error) {
-        console.error('Error initializing charts:', error);
     }
 }
 
-// Load services for filter dropdown
-function loadServices() {
-    fetch(`${settings.serverUrl}/api/services`)
-        .then(response => response.json())
-        .then(services => {
-            serviceFilter.innerHTML = '<option value="">All Services</option>';
-            services.forEach(service => {
-                const option = document.createElement('option');
-                option.value = service;
-                option.textContent = service;
-                serviceFilter.appendChild(option);
-            });
-        })
-        .catch(error => {
-            console.error('Error loading services:', error);
-        });
-}
-
-// Connect to WebSockets
-function connectWebSockets() {
-    console.log('Attempting to connect to WebSockets...');
-
-    // Build any saved filter parameters
-    let params = new URLSearchParams();
-    if (settings.filters) {
-        if (settings.filters.service) params.append('service', settings.filters.service);
-        if (settings.filters.timeRange) params.append('time_range', settings.filters.timeRange);
-        
-        // Logs specific filters
-        if (settings.filters.logLevel) params.append('level', settings.filters.logLevel);
-        if (settings.filters.logSearch) params.append('search', settings.filters.logSearch);
-    }
-
-    // Logs WebSocket
-    connectLogsWebSocket(params);
-
-    // Metrics WebSocket with metrics-specific filters
-    let metricsParams = new URLSearchParams(params.toString());
-    if (settings.filters && settings.filters.metricName) metricsParams.append('name', settings.filters.metricName);
-    if (settings.filters && settings.filters.metricType) metricsParams.append('type', settings.filters.metricType);
-    connectMetricsWebSocket(metricsParams);
-
-    // Traces WebSocket with traces-specific filters
-    let tracesParams = new URLSearchParams(params.toString());
-    if (settings.filters && settings.filters.traceStatus) tracesParams.append('status', settings.filters.traceStatus);
-    if (settings.filters && settings.filters.minDuration) tracesParams.append('min_duration', settings.filters.minDuration);
-    connectTracesWebSocket(tracesParams);
-}
-
-// Connect to the logs WebSocket
-function connectLogsWebSocket(params) {
-    // Convert http/https to ws/wss
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    
-    // Add parameters if provided
-    let wsUrl = `${wsProtocol}//${window.location.host}/ws/logs`;
-    if (params) {
-        wsUrl += `?${params.toString()}`;
-    }
-    
-    console.log('Connecting to logs WebSocket at:', wsUrl);
-    logsSocket = new WebSocket(wsUrl);
-    
-    logsSocket.onopen = function() {
-        console.log('Connected to logs WebSocket');
-    };
-    
-    logsSocket.onmessage = function(event) {
-        console.log('Raw WebSocket message received:', event.data);
-        
-        if (settings.isPaused) {
-            console.log('Dashboard is paused, ignoring message');
-            return;
-        }
-        
-        try {
-            const data = JSON.parse(event.data);
-            console.log('Parsed WebSocket data:', data);
-            
-            // Check if the data is in the expected format
-            if (data.type === 'logs' && Array.isArray(data.payload)) {
-                // Handle array of logs
-                console.log(`Processing ${data.payload.length} logs from WebSocket`);
-                // Process in reverse order to show newest first when inserting at the top
-                for (let i = data.payload.length - 1; i >= 0; i--) {
-                    addLogEntry(data.payload[i]);
-                }
-            } else if (data.timestamp || data.message) {
-                // It's a single log object
-                console.log('Processing single log from WebSocket');
-                addLogEntry(data);
-            } else {
-                console.warn('Received unexpected data format:', data);
-            }
-        } catch (error) {
-            console.error('Error parsing log data:', error);
-            console.error('Raw data:', event.data);
-        }
-    };
-    
-    logsSocket.onclose = function() {
-        console.log('Disconnected from logs WebSocket');
-        // Try to reconnect after a delay
-        setTimeout(function() {
-            connectLogsWebSocket(params);
-        }, 3000);
-    };
-    
-    logsSocket.onerror = function(error) {
-        console.error('Logs WebSocket error:', error);
-    };
-}
-
-// Connect to the metrics WebSocket
-function connectMetricsWebSocket(params) {
-    // Convert http/https to ws/wss
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    
-    // Add parameters if provided
-    let wsUrl = `${wsProtocol}//${window.location.host}/ws/metrics`;
-    if (params) {
-        wsUrl += `?${params.toString()}`;
-    }
-    
-    console.log('Connecting to metrics WebSocket at:', wsUrl);
-    metricsSocket = new WebSocket(wsUrl);
-    
-    metricsSocket.onopen = function() {
-        console.log('Connected to metrics WebSocket');
-    };
-    
-    metricsSocket.onmessage = function(event) {
-        if (settings.isPaused) return;
-        
-        try {
-            const data = JSON.parse(event.data);
-            console.log('Received metrics websocket data:', data);
-            
-            if (data.type === 'metrics' && Array.isArray(data.payload)) {
-                // Process multiple metrics
-                // Process in reverse order to show newest first
-                for (let i = data.payload.length - 1; i >= 0; i--) {
-                    updateMetrics(data.payload[i]);
-                }
-                
-                // Update chart if we have metrics data
-                if (data.payload.length > 0) {
-                    updateMetricsChart(data.payload);
-                }
-            } else {
-                console.warn('Received unexpected metrics data format:', data);
-            }
-        } catch (error) {
-            console.error('Error parsing metrics data:', error);
-        }
-    };
-    
-    metricsSocket.onclose = function() {
-        console.log('Disconnected from metrics WebSocket');
-        // Try to reconnect after a delay
-        setTimeout(function() {
-            connectMetricsWebSocket(params);
-        }, 3000);
-    };
-    
-    metricsSocket.onerror = function(error) {
-        console.error('Metrics WebSocket error:', error);
-    };
-}
-
-// Connect to the traces WebSocket
-function connectTracesWebSocket(params) {
-    // Convert http/https to ws/wss
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    
-    // Add parameters if provided
-    let wsUrl = `${wsProtocol}//${window.location.host}/ws/traces`;
-    if (params) {
-        wsUrl += `?${params.toString()}`;
-    }
-    
-    console.log('Connecting to traces WebSocket at:', wsUrl);
-    tracesSocket = new WebSocket(wsUrl);
-    
-    tracesSocket.onopen = function() {
-        console.log('Connected to traces WebSocket');
-    };
-    
-    tracesSocket.onmessage = function(event) {
-        if (settings.isPaused) return;
-        
-        try {
-            const data = JSON.parse(event.data);
-            console.log('Received traces websocket data:', data);
-            
-            if (data.type === 'traces' && Array.isArray(data.payload)) {
-                // Process multiple traces
-                // Process in reverse order to show newest first
-                for (let i = data.payload.length - 1; i >= 0; i--) {
-                    updateTraces(data.payload[i]);
-                }
-                
-                // Update chart if we have trace data
-                if (data.payload.length > 0) {
-                    updateTracesChart(data.payload);
-                }
-            } else {
-                console.warn('Received unexpected traces data format:', data);
-            }
-        } catch (error) {
-            console.error('Error parsing traces data:', error);
-        }
-    };
-    
-    tracesSocket.onclose = function() {
-        console.log('Disconnected from traces WebSocket');
-        // Try to reconnect after a delay
-        setTimeout(function() {
-            connectTracesWebSocket(params);
-        }, 3000);
-    };
-    
-    tracesSocket.onerror = function(error) {
-        console.error('Traces WebSocket error:', error);
-    };
-}
-
-// Disconnect all WebSockets
-function disconnectWebSockets() {
-    // Close logs WebSocket if it exists
-    if (logsSocket && logsSocket.readyState !== WebSocket.CLOSED) {
-        logsSocket.close();
-        logsSocket = null;
-    }
-    
-    // Close metrics WebSocket if it exists
-    if (metricsSocket && metricsSocket.readyState !== WebSocket.CLOSED) {
-        metricsSocket.close();
-        metricsSocket = null;
-    }
-    
-    // Close traces WebSocket if it exists
-    if (tracesSocket && tracesSocket.readyState !== WebSocket.CLOSED) {
-        tracesSocket.close();
-        tracesSocket = null;
-    }
-    
-    console.log('All WebSocket connections closed');
-}
-
-// Apply filters to the data
+// Apply filters and reconnect WebSockets
 function applyFilters() {
-    console.log('Applying filters...');
+    const settings = SettingsModule.get();
     
-    // Get the active tab
-    const activeTab = document.querySelector('nav a.active').getAttribute('data-tab');
-    
-    // Get common filter values
+    // Get filter values
     const service = document.getElementById('service-filter').value;
-    const timeRange = document.getElementById('time-range').value;
+    const timeRangeValue = document.getElementById('time-range').value;
     
-    // Build the query parameters
-    let params = new URLSearchParams();
-    if (service) params.append('service', service);
-    if (timeRange) params.append('time_range', timeRange);
-    
-    // Store filters in settings
-    settings.filters = {
+    // Tab-specific filters
+    let filters = {
         service: service,
-        timeRange: timeRange
+        timeRange: timeRangeValue
     };
     
-    // Add tab-specific filters
+    // Add logs-specific filters
     if (activeTab === 'logs') {
-        const logLevel = document.getElementById('log-level').value;
-        const logSearch = document.getElementById('log-search').value;
-        
-        if (logLevel) {
-            params.append('level', logLevel);
-            settings.filters.logLevel = logLevel;
-        }
-        if (logSearch) {
-            params.append('search', logSearch);
-            settings.filters.logSearch = logSearch;
-        }
-        
-        // Clear the logs table
-        const logsBody = document.getElementById('logs-body');
-        if (logsBody) {
-            logsBody.innerHTML = '';
-        }
-        
-        // Disconnect and reconnect the WebSocket with new filters
-        if (logsSocket) {
-            logsSocket.close();
-        }
-        
-        // Connect with filters
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/logs?${params.toString()}`;
-        
-        console.log('Connecting to logs WebSocket with filters at:', wsUrl);
-        logsSocket = new WebSocket(wsUrl);
-        
-        logsSocket.onopen = function() {
-            console.log('Connected to logs WebSocket with filters');
-        };
-        
-        logsSocket.onmessage = function(event) {
-            if (settings.isPaused) return;
-            
-            try {
-                const data = JSON.parse(event.data);
-                console.log('Received logs websocket data:', data);
-                
-                // Check if the data is in the expected format
-                if (data.type === 'logs' && Array.isArray(data.payload)) {
-                    // Handle array of logs
-                    console.log(`Processing ${data.payload.length} logs from WebSocket`);
-                    // Process in reverse order to show newest first when inserting at the top
-                    for (let i = data.payload.length - 1; i >= 0; i--) {
-                        addLogEntry(data.payload[i]);
-                    }
-                } else if (data.timestamp || data.message) {
-                    // It's a single log object
-                    console.log('Processing single log from WebSocket');
-                    addLogEntry(data);
-                } else {
-                    console.warn('Received unexpected data format:', data);
-                }
-            } catch (error) {
-                console.error('Error parsing log data:', error);
-                console.error('Raw data:', event.data);
-            }
-        };
-        
-        logsSocket.onclose = function() {
-            console.log('Disconnected from logs WebSocket');
-            // Try to reconnect after a delay
-            setTimeout(function() {
-                connectLogsWebSocket(params);
-            }, 3000);
-        };
-        
-        logsSocket.onerror = function(error) {
-            console.error('Logs WebSocket error:', error);
-        };
-        
-        // Also fetch initial logs via HTTP API
-        fetch(`${settings.serverUrl}/api/logs?${params.toString()}`)
-            .then(response => response.json())
-            .then(data => {
-                console.log(`Received ${data.length} logs from API`);
-                // Add each log to the table
-                data.forEach(log => {
-                    addLogEntry(log);
-                });
-            })
-            .catch(error => {
-                console.error('Error fetching logs:', error);
-            });
-            
-    } else if (activeTab === 'metrics') {
-        const metricName = document.getElementById('metric-name').value;
-        const metricType = document.getElementById('metric-type').value;
-        
-        if (metricName) {
-            params.append('name', metricName);
-            settings.filters.metricName = metricName;
-        }
-        if (metricType) {
-            params.append('type', metricType);
-            settings.filters.metricType = metricType;
-        }
-        
-        // Clear the metrics table
-        const metricsBody = document.getElementById('metrics-body');
-        if (metricsBody) {
-            metricsBody.innerHTML = '';
-        }
-        
-        // Disconnect and reconnect the WebSocket with new filters
-        if (metricsSocket) {
-            metricsSocket.close();
-        }
-        
-        // Connect with filters
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/metrics?${params.toString()}`;
-        
-        console.log('Connecting to metrics WebSocket with filters at:', wsUrl);
-        metricsSocket = new WebSocket(wsUrl);
-        
-        metricsSocket.onopen = function() {
-            console.log('Connected to metrics WebSocket with filters');
-        };
-        
-        metricsSocket.onmessage = function(event) {
-            if (settings.isPaused) return;
-            
-            try {
-                const data = JSON.parse(event.data);
-                console.log('Received metrics websocket data:', data);
-                
-                if (data.type === 'metrics' && Array.isArray(data.payload)) {
-                    // Process multiple metrics
-                    // Process in reverse order to show newest first
-                    for (let i = data.payload.length - 1; i >= 0; i--) {
-                        updateMetrics(data.payload[i]);
-                    }
-                    
-                    // Update chart if we have metrics data
-                    if (data.payload.length > 0) {
-                        updateMetricsChart(data.payload);
-                    }
-                } else {
-                    console.warn('Received unexpected metrics data format:', data);
-                }
-            } catch (error) {
-                console.error('Error parsing metrics data:', error);
-            }
-        };
-        
-        metricsSocket.onclose = function() {
-            console.log('Disconnected from metrics WebSocket');
-            // Try to reconnect after a delay
-            setTimeout(function() {
-                connectMetricsWebSocket(params);
-            }, 3000);
-        };
-        
-        metricsSocket.onerror = function(error) {
-            console.error('Metrics WebSocket error:', error);
-        };
-        
-        // Also fetch initial metrics via HTTP API
-        fetch(`${settings.serverUrl}/api/metrics?${params.toString()}`)
-            .then(response => response.json())
-            .then(data => {
-                console.log(`Received ${data.length} metrics from API`);
-                // Add each metric to the table
-                data.forEach(metric => {
-                    updateMetrics(metric);
-                });
-                
-                // Update chart
-                if (data.length > 0) {
-                    updateMetricsChart(data);
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching metrics:', error);
-            });
-            
-    } else if (activeTab === 'traces') {
-        const traceStatus = document.getElementById('trace-status').value;
-        const minDuration = document.getElementById('min-duration').value;
-        
-        if (traceStatus) {
-            params.append('status', traceStatus);
-            settings.filters.traceStatus = traceStatus;
-        }
-        if (minDuration) {
-            params.append('min_duration', minDuration);
-            settings.filters.minDuration = minDuration;
-        }
-        
-        // Clear the traces table
-        const tracesBody = document.getElementById('traces-body');
-        if (tracesBody) {
-            tracesBody.innerHTML = '';
-        }
-        
-        // Disconnect and reconnect the WebSocket with new filters
-        if (tracesSocket) {
-            tracesSocket.close();
-        }
-        
-        // Connect with filters
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/traces?${params.toString()}`;
-        
-        console.log('Connecting to traces WebSocket with filters at:', wsUrl);
-        tracesSocket = new WebSocket(wsUrl);
-        
-        tracesSocket.onopen = function() {
-            console.log('Connected to traces WebSocket with filters');
-        };
-        
-        tracesSocket.onmessage = function(event) {
-            if (settings.isPaused) return;
-            
-            try {
-                const data = JSON.parse(event.data);
-                console.log('Received traces websocket data:', data);
-                
-                if (data.type === 'traces' && Array.isArray(data.payload)) {
-                    // Process multiple traces
-                    // Process in reverse order to show newest first
-                    for (let i = data.payload.length - 1; i >= 0; i--) {
-                        updateTraces(data.payload[i]);
-                    }
-                    
-                    // Update chart if we have trace data
-                    if (data.payload.length > 0) {
-                        updateTracesChart(data.payload);
-                    }
-                } else {
-                    console.warn('Received unexpected traces data format:', data);
-                }
-            } catch (error) {
-                console.error('Error parsing traces data:', error);
-            }
-        };
-        
-        tracesSocket.onclose = function() {
-            console.log('Disconnected from traces WebSocket');
-            // Try to reconnect after a delay
-            setTimeout(function() {
-                connectTracesWebSocket(params);
-            }, 3000);
-        };
-        
-        tracesSocket.onerror = function(error) {
-            console.error('Traces WebSocket error:', error);
-        };
-        
-        // Also fetch initial traces via HTTP API
-        fetch(`${settings.serverUrl}/api/traces?${params.toString()}`)
-            .then(response => response.json())
-            .then(data => {
-                console.log(`Received ${data.length} traces from API`);
-                // Add each trace to the table
-                data.forEach(trace => {
-                    updateTraces(trace);
-                });
-                
-                // Update chart
-                if (data.length > 0) {
-                    updateTracesChart(data);
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching traces:', error);
-            });
+        filters.logLevel = document.getElementById('log-level').value;
+        filters.logSearch = document.getElementById('log-search').value;
     }
     
-    // Save filters to localStorage without showing the alert
-    localStorage.setItem('pulseSettings', JSON.stringify(settings));
-}
-
-// Add metric to table
-function addMetricToTable(metric) {
-    // Get the table body
-    const metricsBody = document.getElementById('metrics-body');
-    if (!metricsBody) {
-        console.error('Could not find metrics-body element');
-        return;
+    // Add metrics-specific filters
+    else if (activeTab === 'metrics') {
+        filters.metricName = document.getElementById('metric-name').value;
+        filters.metricType = document.getElementById('metric-type').value;
     }
     
-    // Limit the number of rows (remove from the bottom)
-    while (metricsBody.children.length >= settings.maxItems && metricsBody.lastChild) {
-        metricsBody.removeChild(metricsBody.lastChild);
-    }
-
-    const row = document.createElement('tr');
-    
-    // Format timestamp
-    const timestamp = new Date(metric.timestamp);
-    const formattedTime = timestamp.toLocaleDateString() + ' ' + timestamp.toLocaleTimeString();
-    
-    // Format tags if present
-    let tagsHtml = '';
-    if (metric.tags && typeof metric.tags === 'object') {
-        tagsHtml = formatTags(metric.tags);
+    // Add traces-specific filters
+    else if (activeTab === 'traces') {
+        filters.traceStatus = document.getElementById('trace-status').value;
+        filters.minDuration = document.getElementById('min-duration').value;
     }
     
-    row.innerHTML = `
-        <td>${formattedTime}</td>
-        <td>${metric.name}</td>
-        <td>${metric.value}</td>
-        <td>${metric.type || ''}</td>
-        <td>${metric.service || 'unknown'}</td>
-        <td>${tagsHtml}</td>
-    `;
-    
-    // Add the row to the top of the table (newest first)
-    metricsBody.insertBefore(row, metricsBody.firstChild);
-}
-
-// Add trace to table
-function addTraceToTable(trace) {
-    // Get the table body
-    const tracesBody = document.getElementById('traces-body');
-    if (!tracesBody) {
-        console.error('Could not find traces-body element');
-        return;
-    }
-    
-    // Limit the number of rows (remove from the bottom)
-    while (tracesBody.children.length >= settings.maxItems && tracesBody.lastChild) {
-        tracesBody.removeChild(tracesBody.lastChild);
-    }
-
-    const row = document.createElement('tr');
-    
-    // Format timestamp
-    const timestamp = new Date(trace.start_time);
-    const formattedTime = timestamp.toLocaleDateString() + ' ' + timestamp.toLocaleTimeString();
-    
-    // Format tags if present
-    let tagsHtml = '';
-    if (trace.tags && typeof trace.tags === 'object') {
-        tagsHtml = formatTags(trace.tags);
-    }
-    
-    row.innerHTML = `
-        <td>${formattedTime}</td>
-        <td>${trace.name || ''}</td>
-        <td>${trace.service || 'unknown'}</td>
-        <td>${trace.duration || 0}</td>
-        <td>${trace.status || 'unknown'}</td>
-        <td>${tagsHtml}</td>
-    `;
-    
-    // Add the row to the top of the table (newest first)
-    tracesBody.insertBefore(row, tracesBody.firstChild);
-}
-
-// Update metrics chart with new data
-function updateMetricsChart(metrics) {
-    if (!metricsChart) return;
-    
-    // If metrics is a single object, convert to array
-    if (!Array.isArray(metrics)) {
-        metrics = [metrics];
-    }
-    
-    console.log(`Updating metrics chart with ${metrics.length} metrics`);
-    
-    // Group metrics by name
-    const metricsByName = {};
-    metrics.forEach(metric => {
-        if (!metricsByName[metric.name]) {
-            metricsByName[metric.name] = [];
-        }
-        metricsByName[metric.name].push(metric);
-    });
-    
-    // Clear current datasets
-    metricsChart.data.datasets = [];
-    
-    // Add each metric group to the chart
-    Object.keys(metricsByName).forEach(name => {
-        const metrics = metricsByName[name];
-        const color = getRandomColor();
-        
-        // Create a dataset for this metric name
-        const dataset = {
-            label: name,
-            data: metrics.map(m => ({
-                x: new Date(m.timestamp || Date.now()),
-                y: parseFloat(m.value)
-            })),
-            borderColor: color,
-            backgroundColor: color + '33',  // Add alpha transparency
-            fill: false,
-            tension: 0.1
-        };
-        
-        metricsChart.data.datasets.push(dataset);
-    });
-    
-    // Update the chart
-    metricsChart.update();
-}
-
-// Update traces chart with new data
-function updateTracesChart(traces) {
-    if (!tracesChart) return;
-    
-    // If traces is a single object, convert to array
-    if (!Array.isArray(traces)) {
-        traces = [traces];
-    }
-    
-    console.log(`Updating traces chart with ${traces.length} traces`);
-    
-    // Group traces by service and name
-    const traceGroups = {};
-    traces.forEach(trace => {
-        const key = `${trace.service || 'unknown'}: ${trace.name || 'unknown'}`;
-        if (!traceGroups[key]) {
-            traceGroups[key] = [];
-        }
-        traceGroups[key].push(trace);
-    });
-    
-    // Clear current data
-    tracesChart.data.labels = [];
-    tracesChart.data.datasets[0].data = [];
-    
-    // Calculate average duration for each group
-    Object.keys(traceGroups).forEach(name => {
-        const traces = traceGroups[name];
-        const avgDuration = traces.reduce((sum, trace) => {
-            return sum + (parseFloat(trace.duration_ms) || 0);
-        }, 0) / traces.length;
-        
-        tracesChart.data.labels.push(name);
-        tracesChart.data.datasets[0].data.push(avgDuration);
-    });
-    
-    // Update the chart
-    tracesChart.update();
+    // Apply filters and reconnect WebSockets
+    WebSocketsModule.applyFilters(filters, settings);
 }
 
 // Add a log entry to the table
 function addLogEntry(log) {
     console.log('Adding log entry:', log);
     
-    // Check if we've reached the maximum number of logs to display
+    // Add to our log entries array
+    logEntries.unshift(log); // Add to beginning to show newest first
+    
+    // Trim the array if it gets too large
+    const settings = SettingsModule.get();
+    if (logEntries.length > settings.maxItems) {
+        logEntries = logEntries.slice(0, settings.maxItems);
+    }
+    
+    // Update pagination and re-render
+    updatePagination();
+    renderCurrentPage();
+}
+
+// Update pagination information
+function updatePagination() {
+    totalPages = Math.max(1, Math.ceil(logEntries.length / pageSize));
+    
+    // Update UI elements
+    const currentPageEl = document.getElementById('current-page');
+    const totalPagesEl = document.getElementById('total-pages');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    
+    if (currentPageEl) currentPageEl.textContent = currentPage;
+    if (totalPagesEl) totalPagesEl.textContent = totalPages;
+    
+    // Disable/enable buttons as needed
+    if (prevPageBtn) prevPageBtn.disabled = currentPage <= 1;
+    if (nextPageBtn) nextPageBtn.disabled = currentPage >= totalPages;
+    
+    // Adjust current page if needed
+    if (currentPage > totalPages) {
+        currentPage = totalPages;
+    }
+}
+
+// Render the current page of log entries
+function renderCurrentPage() {
     const logsBody = document.getElementById('logs-body');
     if (!logsBody) {
         console.error('Could not find logs-body element');
         return;
     }
     
-    // Check if we need to remove old logs (remove from the bottom)
-    while (logsBody.children.length >= settings.maxItems && logsBody.lastChild) {
-        logsBody.removeChild(logsBody.lastChild);
-    }
+    // Clear the current table content
+    logsBody.innerHTML = '';
     
+    // Calculate start and end indices
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, logEntries.length);
+    
+    // Render log entries for the current page
+    for (let i = startIndex; i < endIndex; i++) {
+        const log = logEntries[i];
+        renderLogEntry(log, logsBody);
+    }
+}
+
+// Render a single log entry in the table
+function renderLogEntry(log, logsBody) {
     // Create a new row
     const row = document.createElement('tr');
     
@@ -1000,75 +328,180 @@ function addLogEntry(log) {
         console.error('Error parsing timestamp:', e);
     }
     
-    // Get the log level and apply appropriate class
-    const level = log.level || 'INFO';
-    row.classList.add(`level-${level.toLowerCase()}`);
+    // Set log level as a class for styling
+    if (log.level) {
+        row.classList.add(`level-${log.level.toLowerCase()}`);
+    }
+    
+    // Build the row content
+    row.innerHTML = `
+        <td>${timestamp}</td>
+        <td>${log.level || 'INFO'}</td>
+        <td>${log.service || 'unknown'}</td>
+        <td>${log.message || ''}</td>
+        <td>${Utils.formatTags(log.tags || {})}</td>
+    `;
+    
+    // Add the row to the table
+    logsBody.appendChild(row);
+}
+
+// Update metrics data
+function updateMetrics(metric) {
+    // Add to metrics table
+    addMetricToTable(metric);
+    
+    // Collect all metrics for chart update
+    const metricsBody = document.getElementById('metrics-body');
+    const metrics = [];
+    
+    if (metricsBody) {
+        // Get all metrics from the table
+        const rows = metricsBody.querySelectorAll('tr');
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 6) {
+                metrics.push({
+                    timestamp: cells[0].getAttribute('data-timestamp'),
+                    name: cells[1].textContent,
+                    value: cells[2].textContent,
+                    type: cells[3].textContent,
+                    service: cells[4].textContent,
+                    tags: cells[5].getAttribute('data-tags')
+                });
+            }
+        });
+    }
+    
+    // Update the chart
+    ChartsModule.updateMetricsChart(metrics);
+}
+
+// Add a metric to the metrics table
+function addMetricToTable(metric) {
+    const metricsBody = document.getElementById('metrics-body');
+    if (!metricsBody) {
+        console.error('Could not find metrics-body element');
+        return;
+    }
+    
+    // Check if we've reached the maximum number of metrics to display
+    const settings = SettingsModule.get();
+    while (metricsBody.children.length >= settings.maxItems && metricsBody.lastChild) {
+        metricsBody.removeChild(metricsBody.lastChild);
+    }
+    
+    // Create a new row
+    const row = document.createElement('tr');
+    
+    // Format the timestamp
+    let timestamp = metric.timestamp || new Date().toISOString();
+    let displayTimestamp = timestamp;
+    try {
+        // Try to parse and format the timestamp
+        const date = new Date(timestamp);
+        displayTimestamp = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    } catch (e) {
+        console.error('Error parsing timestamp:', e);
+    }
     
     // Format tags if present
-    let tagsHtml = '';
-    if (log.tags && typeof log.tags === 'object') {
-        tagsHtml = formatTags(log.tags);
+    let tagsHtml = Utils.formatTags(metric.tags || {});
+    
+    // Set the row content
+    row.innerHTML = `
+        <td data-timestamp="${timestamp}">${displayTimestamp}</td>
+        <td>${metric.name || 'unknown'}</td>
+        <td>${metric.value || '0'}</td>
+        <td>${metric.type || 'gauge'}</td>
+        <td>${metric.service || 'unknown'}</td>
+        <td data-tags="${JSON.stringify(metric.tags || {})}">${tagsHtml}</td>
+    `;
+    
+    // Add the row to the table (at the beginning to show newest first)
+    metricsBody.insertBefore(row, metricsBody.firstChild);
+}
+
+// Update traces data
+function updateTraces(trace) {
+    // Add to traces table
+    addTraceToTable(trace);
+    
+    // Collect all traces for chart update
+    const tracesBody = document.getElementById('traces-body');
+    const traces = [];
+    
+    if (tracesBody) {
+        // Get all traces from the table
+        const rows = tracesBody.querySelectorAll('tr');
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 6) {
+                traces.push({
+                    timestamp: cells[0].getAttribute('data-timestamp'),
+                    name: cells[1].textContent,
+                    service: cells[2].textContent,
+                    duration_ms: cells[3].textContent,
+                    status: cells[4].textContent,
+                    tags: cells[5].getAttribute('data-tags')
+                });
+            }
+        });
+    }
+    
+    // Update the chart
+    ChartsModule.updateTracesChart(traces);
+}
+
+// Add a trace to the traces table
+function addTraceToTable(trace) {
+    const tracesBody = document.getElementById('traces-body');
+    if (!tracesBody) {
+        console.error('Could not find traces-body element');
+        return;
+    }
+    
+    // Check if we've reached the maximum number of traces to display
+    const settings = SettingsModule.get();
+    while (tracesBody.children.length >= settings.maxItems && tracesBody.lastChild) {
+        tracesBody.removeChild(tracesBody.lastChild);
+    }
+    
+    // Create a new row
+    const row = document.createElement('tr');
+    
+    // Format the timestamp
+    let timestamp = trace.timestamp || new Date().toISOString();
+    let displayTimestamp = timestamp;
+    try {
+        // Try to parse and format the timestamp
+        const date = new Date(timestamp);
+        displayTimestamp = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    } catch (e) {
+        console.error('Error parsing timestamp:', e);
+    }
+    
+    // Format tags if present
+    let tagsHtml = Utils.formatTags(trace.tags || {});
+    
+    // Set status class
+    if (trace.status && trace.status.toLowerCase() === 'error') {
+        row.classList.add('status-error');
     }
     
     // Set the row content
     row.innerHTML = `
-        <td>${timestamp}</td>
-        <td>${level}</td>
-        <td>${log.service || 'unknown'}</td>
-        <td>${log.message || ''}</td>
-        <td>${tagsHtml}</td>
+        <td data-timestamp="${timestamp}">${displayTimestamp}</td>
+        <td>${trace.name || 'unknown'}</td>
+        <td>${trace.service || 'unknown'}</td>
+        <td>${trace.duration_ms || '0'}</td>
+        <td>${trace.status || 'OK'}</td>
+        <td data-tags="${JSON.stringify(trace.tags || {})}">${tagsHtml}</td>
     `;
     
     // Add the row to the table (at the beginning to show newest first)
-    logsBody.insertBefore(row, logsBody.firstChild);
+    tracesBody.insertBefore(row, tracesBody.firstChild);
 }
 
-// Update metrics with new data
-function updateMetrics(metric) {
-    if (!metric) return;
-    
-    // Add to metrics table
-    addMetricToTable(metric);
-    
-    // Update metrics chart
-    updateMetricsChart(metric);
-}
-
-// Update traces with new data
-function updateTraces(trace) {
-    if (!trace) return;
-    
-    // Add to traces table
-    addTraceToTable(trace);
-    
-    // Update traces chart
-    updateTracesChart(trace);
-}
-
-// Format tags as styled elements
-function formatTags(tags) {
-    if (!tags || typeof tags !== 'object') {
-        return '';
-    }
-    
-    let result = '';
-    for (const key in tags) {
-        if (tags.hasOwnProperty(key)) {
-            result += `<span class="tag" title="${key}=${tags[key]}">${key}=${tags[key]}</span> `;
-        }
-    }
-    return result;
-}
-
-// Generate a random color
-function getRandomColor() {
-    const letters = '0123456789ABCDEF';
-    let color = '#';
-    for (let i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-    }
-    return color;
-}
-
-// Initialize the dashboard when the page loads
+// Initialize the dashboard when the DOM is loaded
 document.addEventListener('DOMContentLoaded', initDashboard); 
