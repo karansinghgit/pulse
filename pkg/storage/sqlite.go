@@ -289,19 +289,19 @@ func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) (map[string]interfa
 		sqlQuery += " ORDER BY timestamp DESC"
 	}
 
-	// Add offset for pagination
-	if query.Offset > 0 {
-		sqlQuery += " OFFSET ?"
-		args = append(args, query.Offset)
-	}
-
-	// Add limit
+	// Add limit first (SQLite requires LIMIT before OFFSET)
 	if query.Limit > 0 {
 		sqlQuery += " LIMIT ?"
 		args = append(args, query.Limit)
 	} else {
 		// Default limit to prevent massive result sets
 		sqlQuery += " LIMIT 100"
+	}
+
+	// Add offset for pagination after LIMIT
+	if query.Offset > 0 {
+		sqlQuery += " OFFSET ?"
+		args = append(args, query.Offset)
 	}
 
 	// Execute the query

@@ -11,6 +11,7 @@ body {
   background-color: #f5f7fa;
 }
 
+/* Old log level styling (kept for backwards compatibility) */
 .log-level {
   padding: 4px 8px;
   border-radius: 4px;
@@ -19,27 +20,56 @@ body {
   display: inline-block;
 }
 
+/* Row-based log level styling */
 .log-level-debug {
-  background-color: #e3f2fd;
+  background-color: rgba(227, 242, 253, 0.5);
+}
+
+.log-level-debug td:nth-child(2) {
+  font-weight: 500;
   color: #1565c0;
 }
 
 .log-level-info {
-  background-color: #e8f5e9;
+  background-color: rgba(232, 245, 233, 0.5);
+}
+
+.log-level-info td:nth-child(2) {
+  font-weight: 500;
   color: #2e7d32;
 }
 
 .log-level-warning {
-  background-color: #fff8e1;
+  background-color: rgba(255, 248, 225, 0.5);
+}
+
+.log-level-warning td:nth-child(2) {
+  font-weight: 500;
   color: #f57f17;
 }
 
 .log-level-error {
-  background-color: #ffebee;
+  background-color: rgba(255, 235, 238, 0.6);
+}
+
+.log-level-error td:nth-child(2) {
+  font-weight: 700;
   color: #c62828;
 }
 
 .log-level-fatal {
-  background-color: #b71c1c;
-  color: #fff;
+  background-color: rgba(183, 28, 28, 0.1);
+}
+
+.log-level-fatal td:nth-child(2) {
+  font-weight: 700;
+  color: #b71c1c;
+  background-color: rgba(183, 28, 28, 0.2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Pagination styles */
+.MuiPagination-root {
+  margin-top: 16px;
 } 

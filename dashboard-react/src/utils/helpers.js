@@ -8,7 +8,7 @@ import { format } from 'date-fns';
 export const formatTimestamp = (timestamp) => {
   try {
     const date = new Date(timestamp);
-    return format(date, 'yyyy-MM-dd HH:mm:ss');
+    return format(date, 'yyyy-MM-dd HH:mm:ss.SSS');
   } catch (error) {
     console.error('Error formatting timestamp:', error);
     return timestamp || 'Unknown';
@@ -26,8 +26,8 @@ export const formatTags = (tags) => {
   }
   
   return Object.entries(tags)
-    .map(([key, value]) => `${key}=${value}`)
-    .join(', ');
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n');
 };
 
 /**
@@ -38,8 +38,40 @@ export const formatTags = (tags) => {
 export const getLogLevelClass = (level) => {
   if (!level) return '';
   
-  const normalizedLevel = level.toLowerCase();
-  return `log-level log-level-${normalizedLevel}`;
+  const normalizedLevel = String(level).toLowerCase();
+  switch (normalizedLevel) {
+    case 'debug':
+      return 'log-level-debug';
+    case 'info':
+      return 'log-level-info';
+    case 'warning':
+    case 'warn':
+      return 'log-level-warning';
+    case 'error':
+      return 'log-level-error';
+    case 'fatal':
+    case 'critical':
+      return 'log-level-fatal';
+    default:
+      return '';
+  }
+};
+
+/**
+ * Format a duration in milliseconds to a readable string
+ * @param {number} ms - Duration in milliseconds
+ * @returns {string} Formatted duration
+ */
+export const formatDuration = (ms) => {
+  if (ms < 1000) {
+    return `${ms.toFixed(2)}ms`;
+  } else if (ms < 60000) {
+    return `${(ms / 1000).toFixed(2)}s`;
+  } else {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = ((ms % 60000) / 1000).toFixed(2);
+    return `${minutes}m ${seconds}s`;
+  }
 };
 
 /**
@@ -57,7 +89,7 @@ export const loadServices = async () => {
 };
 
 /**
- * Generate mock log data
+ * Generate mock log data - used for development only
  * @param {number} count - Number of logs to generate
  * @returns {Array} Array of log objects
  */

@@ -66,19 +66,24 @@ const useLogs = (filters = {}) => {
       console.log(`Fetching logs for page ${currentPage}, pageSize ${pageSize}`);
       
       // Calculate offset based on current page and page size
-      const offset = (currentPage - 1) * pageSize;
+      // Make sure offset is an integer and >= 0
+      const offset = Math.max(0, (currentPage - 1) * pageSize);
       
-      // Prepare query options
+      // Prepare query options - explicitly set all filter values
       const options = {
         limit: pageSize,
-        offset: offset,
+        // Convert offset to a string to avoid issues with large integers
+        offset: String(offset),
         orderBy: 'timestamp',
         orderDesc: true,
+        // Only include filters if they have values
         service: filters.service || undefined,
         level: filters.logLevel || undefined,
         search: filters.logSearch || undefined,
         since: since ? since.toISOString() : undefined
       };
+      
+      console.log('API request options:', options);
       
       // Fetch logs using API client
       const data = await fetchLogs(options);
@@ -93,6 +98,11 @@ const useLogs = (filters = {}) => {
         if (data.pagination) {
           setTotalItems(data.pagination.total_items || 0);
           setTotalPages(Math.max(1, data.pagination.total_pages || 1));
+          
+          // Update current page if it's out of bounds
+          if (currentPage > data.pagination.total_pages && data.pagination.total_pages > 0) {
+            setCurrentPage(1);
+          }
         } else {
           // Fallback if pagination info not provided
           setTotalItems(data.logs.length);
@@ -121,6 +131,11 @@ const useLogs = (filters = {}) => {
     }
   }, [filters, currentPage, pageSize, paused]);
   
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+  
   // Fetch logs when filters, page or pageSize changes
   useEffect(() => {
     console.log(`Page changed to ${currentPage}, fetching logs...`);
@@ -132,7 +147,7 @@ const useLogs = (filters = {}) => {
       refreshInterval = setInterval(() => {
         console.log('Auto-refreshing logs...');
         fetchLogsData();
-      }, 30000); // Increase refresh interval to 30 seconds to prevent frequent refreshes
+      }, 30000); // Refresh interval: 30 seconds
     }
     
     return () => {
@@ -158,7 +173,10 @@ const useLogs = (filters = {}) => {
   const changePage = useCallback((page) => {
     console.log(`Changing to page ${page}`);
     if (page >= 1 && page <= totalPages) {
+      console.log(`Setting current page to ${page}`);
       setCurrentPage(page);
+    } else {
+      console.warn(`Invalid page number: ${page}. Must be between 1 and ${totalPages}`);
     }
   }, [totalPages]);
   
