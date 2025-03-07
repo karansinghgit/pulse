@@ -21,7 +21,7 @@ type Processor interface {
 	ProcessTrace(trace *models.Trace) error
 
 	// QueryLogs queries logs based on parameters
-	QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error)
+	QueryLogs(query *models.QueryParams) (map[string]interface{}, error)
 
 	// QueryMetrics queries metrics based on parameters
 	QueryMetrics(query *models.QueryParams) ([]map[string]interface{}, error)
@@ -86,7 +86,7 @@ func (c Chain) ProcessTrace(trace *models.Trace) error {
 }
 
 // QueryLogs queries logs through the first processor in the chain
-func (c Chain) QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error) {
+func (c Chain) QueryLogs(query *models.QueryParams) (map[string]interface{}, error) {
 	if len(c) == 0 {
 		return nil, fmt.Errorf("no processors in chain")
 	}

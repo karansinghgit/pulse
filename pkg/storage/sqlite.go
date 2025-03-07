@@ -185,8 +185,57 @@ func (s *SQLiteStorage) SaveLog(log *models.LogEntry) error {
 }
 
 // QueryLogs queries logs from the database based on the given parameters
-func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error) {
-	// Build the SQL query
+func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) (map[string]interface{}, error) {
+	// Build the SQL query to count total items
+	countQuery := `
+		SELECT COUNT(*) as total
+		FROM logs
+		WHERE 1=1`
+
+	// Create args slice for parameterized query
+	countArgs := []interface{}{}
+
+	// Add filters for count query
+	if query.Service != "" {
+		countQuery += " AND service = ?"
+		countArgs = append(countArgs, query.Service)
+	}
+
+	if query.Level != "" {
+		countQuery += " AND level = ?"
+		countArgs = append(countArgs, query.Level)
+	}
+
+	if query.Since.IsZero() == false {
+		countQuery += " AND timestamp >= ?"
+		countArgs = append(countArgs, query.Since)
+	}
+
+	if query.Until.IsZero() == false {
+		countQuery += " AND timestamp <= ?"
+		countArgs = append(countArgs, query.Until)
+	}
+
+	if query.TraceID != "" {
+		countQuery += " AND trace_id = ?"
+		countArgs = append(countArgs, query.TraceID)
+	}
+
+	// Add search filter if provided
+	if query.Search != "" {
+		countQuery += " AND (message LIKE ? OR service LIKE ?)"
+		searchTerm := "%" + query.Search + "%"
+		countArgs = append(countArgs, searchTerm, searchTerm)
+	}
+
+	// Execute the count query
+	var totalItems int
+	err := s.db.QueryRow(countQuery, countArgs...).Scan(&totalItems)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count logs: %w", err)
+	}
+
+	// Build the SQL query for data
 	sqlQuery := `
 		SELECT id, timestamp, service, level, message, tags, trace_id, span_id, env, host, source
 		FROM logs
@@ -229,7 +278,22 @@ func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) ([]map[string]inter
 	}
 
 	// Add order by
-	sqlQuery += " ORDER BY timestamp DESC"
+	if query.OrderBy != "" {
+		sqlQuery += fmt.Sprintf(" ORDER BY %s", query.OrderBy)
+		if query.OrderDesc {
+			sqlQuery += " DESC"
+		} else {
+			sqlQuery += " ASC"
+		}
+	} else {
+		sqlQuery += " ORDER BY timestamp DESC"
+	}
+
+	// Add offset for pagination
+	if query.Offset > 0 {
+		sqlQuery += " OFFSET ?"
+		args = append(args, query.Offset)
+	}
 
 	// Add limit
 	if query.Limit > 0 {
@@ -318,7 +382,24 @@ func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) ([]map[string]inter
 		return nil, fmt.Errorf("error iterating log rows: %w", err)
 	}
 
-	return logs, nil
+	// Calculate pagination information
+	pageSize := query.Limit
+	if pageSize <= 0 {
+		pageSize = 100 // Default limit
+	}
+
+	totalPages := (totalItems + pageSize - 1) / pageSize
+
+	// Return results with pagination info
+	return map[string]interface{}{
+		"logs": logs,
+		"pagination": map[string]interface{}{
+			"total_items": totalItems,
+			"total_pages": totalPages,
+			"page_size":   pageSize,
+			"offset":      query.Offset,
+		},
+	}, nil
 }
 
 // SaveMetric saves a metric to the database

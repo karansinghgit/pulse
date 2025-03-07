@@ -8,7 +8,7 @@ import (
 type Storage interface {
 	// Log operations
 	SaveLog(log *models.LogEntry) error
-	QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error)
+	QueryLogs(query *models.QueryParams) (map[string]interface{}, error)
 
 	// Metric operations
 	SaveMetric(metric *models.Metric) error
