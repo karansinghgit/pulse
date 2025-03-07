@@ -90,44 +90,6 @@ const Sidebar = ({ filters, onFilterChange }) => {
         </Select>
       </FormControl>
       
-      {/* Logs-specific filters */}
-      {currentPath === 'logs' && (
-        <>
-          <Divider />
-          <Typography variant="subtitle2">Log Filters</Typography>
-          
-          <FormControl fullWidth size="small">
-            <InputLabel id="log-level-label">Log Level</InputLabel>
-            <Select
-              labelId="log-level-label"
-              id="log-level"
-              name="logLevel"
-              value={localFilters.logLevel}
-              label="Log Level"
-              onChange={handleFilterChange}
-            >
-              <MenuItem value="">All Levels</MenuItem>
-              <MenuItem value="DEBUG">DEBUG</MenuItem>
-              <MenuItem value="INFO">INFO</MenuItem>
-              <MenuItem value="WARNING">WARNING</MenuItem>
-              <MenuItem value="ERROR">ERROR</MenuItem>
-              <MenuItem value="FATAL">FATAL</MenuItem>
-            </Select>
-          </FormControl>
-          
-          <TextField
-            id="log-search"
-            name="logSearch"
-            label="Search Logs"
-            variant="outlined"
-            size="small"
-            value={localFilters.logSearch}
-            onChange={handleFilterChange}
-            fullWidth
-          />
-        </>
-      )}
-      
       {/* Metrics-specific filters */}
       {currentPath === 'metrics' && (
         <>
