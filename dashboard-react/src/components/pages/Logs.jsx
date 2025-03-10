@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTheme, alpha } from '@mui/material/styles';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import Table from '@mui/material/Table';
@@ -9,30 +10,121 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import Pagination from '@mui/material/Pagination';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
+import OutlinedInput from '@mui/material/OutlinedInput';
+import InputAdornment from '@mui/material/InputAdornment';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
+import Card from '@mui/material/Card';
+import CardHeader from '@mui/material/CardHeader';
+import Badge from '@mui/material/Badge';
+import Menu from '@mui/material/Menu';
+import Divider from '@mui/material/Divider';
+import ListItemIcon from '@mui/material/ListItemIcon';
+
+// Icons
+import FilterListIcon from '@mui/icons-material/FilterListOutlined';
+import RefreshIcon from '@mui/icons-material/RefreshOutlined';
 import PauseIcon from '@mui/icons-material/PauseOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrowOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
-import RefreshIcon from '@mui/icons-material/RefreshOutlined';
-import TextField from '@mui/material/TextField';
-import IconButton from '@mui/material/IconButton';
 import SearchIcon from '@mui/icons-material/SearchOutlined';
 import ClearIcon from '@mui/icons-material/CloseOutlined';
-import Divider from '@mui/material/Divider';
+import MoreVertIcon from '@mui/icons-material/MoreVertOutlined';
+import DownloadIcon from '@mui/icons-material/DownloadOutlined';
+import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined';
+import NewReleasesOutlinedIcon from '@mui/icons-material/NewReleasesOutlined';
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 
 import useLogs from '../../hooks/useLogs';
-import { formatTimestamp, formatTags, getLogLevelClass } from '../../utils/helpers';
+import { formatTimestamp, getLogLevelClass } from '../../utils/helpers';
 import { fetchServices } from '../../utils/api';
 
+const LogIcon = ({ level, ...props }) => {
+  switch(level) {
+    case 'DEBUG':
+      return <BugReportOutlinedIcon fontSize="small" {...props} />;
+    case 'INFO':
+      return <InfoOutlinedIcon fontSize="small" {...props} />;
+    case 'WARNING':
+      return <WarningAmberOutlinedIcon fontSize="small" {...props} />;
+    case 'ERROR':
+      return <ErrorOutlineIcon fontSize="small" {...props} />;
+    case 'FATAL':
+      return <NewReleasesOutlinedIcon fontSize="small" {...props} />;
+    default:
+      return <InfoOutlinedIcon fontSize="small" {...props} />;
+  }
+};
+
+const LOG_LEVEL_COLORS = {
+  DEBUG: {
+    light: 'rgba(100, 116, 139, 0.08)',
+    main: '#64748b',
+    icon: '#475569',
+  },
+  INFO: {
+    light: 'rgba(59, 130, 246, 0.08)',
+    main: '#3b82f6',
+    icon: '#2563eb',
+  },
+  WARNING: {
+    light: 'rgba(245, 158, 11, 0.08)',
+    main: '#f59e0b',
+    icon: '#d97706',
+  },
+  ERROR: {
+    light: 'rgba(239, 68, 68, 0.08)',
+    main: '#ef4444',
+    icon: '#dc2626',
+  },
+  FATAL: {
+    light: 'rgba(190, 24, 93, 0.08)',
+    main: '#be185d',
+    icon: '#9d174d',
+  },
+};
+
+// Log level filter changes
+const LogSelector = ({ value, onChange }) => {
+  return (
+    <FormControl size="small" sx={{ minWidth: 120, flex: { sm: '0 0 auto' } }}>
+      <InputLabel id="log-level-label">Log Level</InputLabel>
+      <Select
+        labelId="log-level-label"
+        id="log-level"
+        name="logLevel"
+        value={value}
+        label="Log Level"
+        onChange={onChange}
+      >
+        <MenuItem value="">All Levels</MenuItem>
+        <MenuItem value="DEBUG">Debug</MenuItem>
+        <MenuItem value="INFO">Info</MenuItem>
+        <MenuItem value="WARNING">Warning</MenuItem>
+        <MenuItem value="ERROR">Error</MenuItem>
+        <MenuItem value="FATAL">Fatal</MenuItem>
+      </Select>
+    </FormControl>
+  );
+};
+
 const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
+  const theme = useTheme();
+  
   // Filter state
   const [filters, setFilters] = useState({
     service: initialFilters.service || '',
@@ -40,6 +132,9 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
     logSearch: initialFilters.logSearch || '',
     timeRange: initialFilters.timeRange || '1h'
   });
+  
+  // View state
+  const [viewMode, setViewMode] = useState('all');
   
   // Services state
   const [services, setServices] = useState([]);
@@ -129,112 +224,141 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
       logSearch: ''
     }));
   };
+  
+  // Filter logs for visualization
+  const filteredLogs = logs;
+  
+  // Summary counts
+  const logCounts = {
+    all: logs.length,
+    debug: logs.filter(log => log.level === 'DEBUG').length,
+    info: logs.filter(log => log.level === 'INFO').length,
+    warning: logs.filter(log => log.level === 'WARNING').length,
+    error: logs.filter(log => log.level === 'ERROR').length,
+    fatal: logs.filter(log => log.level === 'FATAL').length,
+  };
 
   return (
-    <Paper 
-      elevation={0} 
-      sx={{ 
-        p: { xs: 2, sm: 3 }, 
-        border: '1px solid',
-        borderColor: 'divider',
-      }}
-    >
+    <Stack spacing={3}>
       <Box sx={{ 
         display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        mb: 3 
+        alignItems: { xs: 'flex-start', sm: 'center' },
+        flexDirection: { xs: 'column', sm: 'row' },
+        justifyContent: 'space-between',
+        gap: 2,
+        my: 1
       }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          Logs Explorer
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title={paused ? "Resume auto-refresh" : "Pause auto-refresh"}>
-            <IconButton 
-              color={paused ? "primary" : "default"}
+        <Box>
+          <Typography 
+            variant="h4" 
+            sx={{ 
+              fontWeight: 600,
+              mb: 0.5
+            }}
+          >
+            Log Explorer
+          </Typography>
+          <Typography
+            variant="body2" 
+            color="text.secondary"
+          >
+            Live streaming logs from all services
+          </Typography>
+        </Box>
+        
+        <Stack direction="row" spacing={1}>
+          <Tooltip title={paused ? "Resume live updates" : "Pause live updates"}>
+            <Button
+              startIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
+              variant="outlined"
+              color={paused ? "primary" : "inherit"}
               onClick={togglePause}
-              aria-label={paused ? "Resume" : "Pause"}
               size="small"
-              sx={{ border: '1px solid', borderColor: 'divider' }}
+              sx={{ borderRadius: 1 }}
             >
-              {paused ? <PlayArrowIcon /> : <PauseIcon />}
-            </IconButton>
+              {paused ? "Resume" : "Pause"}
+            </Button>
           </Tooltip>
-          <Tooltip title="Clear logs">
-            <IconButton 
-              onClick={clearLogs}
-              aria-label="Clear logs"
-              size="small"
-              sx={{ border: '1px solid', borderColor: 'divider' }}
-            >
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
+          
           <Tooltip title="Refresh logs">
             <IconButton
               onClick={refresh}
               disabled={loading}
-              aria-label="Refresh logs"
               size="small"
               color="primary"
               sx={{ 
-                border: '1px solid', 
+                border: '1px solid',
                 borderColor: 'primary.main',
-                '&:hover': {
-                  backgroundColor: 'rgba(0, 0, 0, 0.04)'
-                }
+                borderRadius: 1,
               }}
             >
               {loading ? (
-                <CircularProgress size={18} thickness={2} />
+                <CircularProgress size={16} thickness={2} />
               ) : (
-                <RefreshIcon />
+                <RefreshIcon fontSize="small" />
               )}
             </IconButton>
           </Tooltip>
-        </Box>
+        </Stack>
       </Box>
       
       {error && (
         <Alert 
           severity="error" 
-          sx={{ mb: 3 }}
+          sx={{ mb: 2 }}
+          icon={<ErrorOutlineIcon fontSize="inherit" />}
+          action={
+            <Button color="error" size="small" variant="text" onClick={refresh}>
+              Retry
+            </Button>
+          }
         >
           {error}
         </Alert>
       )}
       
-      {/* Filters */}
-      <Box sx={{ mb: 3 }}>
-        <Box 
-          sx={{ 
-            display: 'flex', 
-            flexWrap: 'wrap', 
-            gap: 2, 
-            alignItems: 'center',
-            mb: 2
-          }}
-        >
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel id="log-level-label">Level</InputLabel>
+      <Card 
+        elevation={0} 
+        sx={{ 
+          borderRadius: 1,
+          overflow: 'visible',
+        }}
+      >
+        <Box sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          gap: 2,
+          p: 2,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          backgroundColor: 'background.paper',
+          position: 'sticky',
+          top: { xs: 56, md: 64 }, // Match header height
+          zIndex: 10,
+        }}>
+          <FormControl size="small" sx={{ minWidth: 120, flex: { sm: '0 0 auto' } }}>
+            <InputLabel id="time-range-label">Time Range</InputLabel>
             <Select
-              labelId="log-level-label"
-              id="log-level"
-              name="logLevel"
-              value={filters.logLevel}
-              label="Level"
+              labelId="time-range-label"
+              id="time-range"
+              name="timeRange"
+              value={filters.timeRange}
+              label="Time Range"
               onChange={handleFilterChange}
             >
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="DEBUG">Debug</MenuItem>
-              <MenuItem value="INFO">Info</MenuItem>
-              <MenuItem value="WARNING">Warning</MenuItem>
-              <MenuItem value="ERROR">Error</MenuItem>
-              <MenuItem value="FATAL">Fatal</MenuItem>
+              <MenuItem value="5m">Last 5 minutes</MenuItem>
+              <MenuItem value="15m">Last 15 minutes</MenuItem>
+              <MenuItem value="1h">Last 1 hour</MenuItem>
+              <MenuItem value="3h">Last 3 hours</MenuItem>
+              <MenuItem value="6h">Last 6 hours</MenuItem>
+              <MenuItem value="12h">Last 12 hours</MenuItem>
+              <MenuItem value="1d">Last 24 hours</MenuItem>
+              <MenuItem value="7d">Last 7 days</MenuItem>
             </Select>
           </FormControl>
           
-          <FormControl size="small" sx={{ minWidth: 130 }}>
+          <FormControl size="small" sx={{ minWidth: 120, flex: { sm: '0 0 auto' } }}>
             <InputLabel id="service-label">Service</InputLabel>
             <Select
               labelId="service-label"
@@ -245,7 +369,7 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
               onChange={handleFilterChange}
               disabled={servicesLoading}
             >
-              <MenuItem value="">All</MenuItem>
+              <MenuItem value="">All Services</MenuItem>
               {servicesLoading ? (
                 <MenuItem disabled>Loading...</MenuItem>
               ) : services.length > 0 ? (
@@ -255,220 +379,299 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
                   </MenuItem>
                 ))
               ) : (
-                <MenuItem disabled>None</MenuItem>
+                <MenuItem disabled>No services</MenuItem>
               )}
             </Select>
           </FormControl>
           
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel id="time-range-label">Time</InputLabel>
-            <Select
-              labelId="time-range-label"
-              id="time-range"
-              name="timeRange"
-              value={filters.timeRange}
-              label="Time"
-              onChange={handleFilterChange}
-            >
-              <MenuItem value="5m">5 minutes</MenuItem>
-              <MenuItem value="15m">15 minutes</MenuItem>
-              <MenuItem value="1h">1 hour</MenuItem>
-              <MenuItem value="3h">3 hours</MenuItem>
-              <MenuItem value="6h">6 hours</MenuItem>
-              <MenuItem value="12h">12 hours</MenuItem>
-              <MenuItem value="1d">24 hours</MenuItem>
-              <MenuItem value="7d">7 days</MenuItem>
-            </Select>
+          <LogSelector value={filters.logLevel} onChange={handleFilterChange} />
+          
+          <FormControl sx={{ flexGrow: 1 }} size="small" variant="outlined">
+            <OutlinedInput
+              placeholder="Search logs..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit(e)}
+              startAdornment={
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              }
+              endAdornment={
+                searchInput && (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      aria-label="clear search"
+                      onClick={handleClearSearch}
+                      edge="end"
+                    >
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }
+            />
           </FormControl>
         </Box>
         
-        <Box component="form" onSubmit={handleSearchSubmit} sx={{ display: 'flex', gap: 1 }}>
-          <TextField
-            size="small"
-            placeholder="Search logs..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            fullWidth
-            variant="outlined"
-            InputProps={{
-              endAdornment: searchInput && (
-                <IconButton
-                  size="small"
-                  aria-label="clear search"
-                  onClick={handleClearSearch}
-                  edge="end"
-                >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              ),
-            }}
-          />
-          <Button
-            type="submit"
-            variant="outlined"
-            startIcon={<SearchIcon />}
-            size="small"
-            sx={{ minWidth: '90px' }}
-          >
-            Search
-          </Button>
-        </Box>
-      </Box>
-
-      {/* Table controls */}
-      {logs.length > 0 && (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 1,
-        }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-              {((pagination.currentPage - 1) * pagination.pageSize) + 1}-{Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
+        {logs.length > 0 && (
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            p: 2,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            backgroundColor: 'background.paper',
+            position: 'sticky',
+            top: { xs: 128, md: 136 }, // Position below filters
+            zIndex: 9,
+          }}>
+            <Typography 
+              variant="body2" 
+              color="text.secondary"
+              sx={{ fontSize: '0.75rem' }}
+            >
+              Showing {((pagination.currentPage - 1) * pagination.pageSize) + 1} - {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
             </Typography>
-            <FormControl size="small" variant="standard" sx={{ minWidth: 50 }}>
-              <Select
-                value={pagination.pageSize}
-                onChange={handlePageSizeChange}
-                disableUnderline
-                sx={{ fontSize: '0.75rem' }}
-              >
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={25}>25</MenuItem>
-                <MenuItem value={50}>50</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-          
-          <Pagination 
-            count={pagination.totalPages} 
-            page={pagination.currentPage}
-            onChange={handlePageChange}
-            color="primary"
-            size="small"
-            siblingCount={0}
-            disabled={loading}
-          />
-        </Box>
-      )}
-
-      {/* Logs table */}
-      <TableContainer sx={{ 
-        maxHeight: 'calc(100vh - 350px)',
-        border: '1px solid',
-        borderColor: 'divider',
-      }}>
-        <Table stickyHeader size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell width="15%" sx={{ fontWeight: 600 }}>Time</TableCell>
-              <TableCell width="10%" sx={{ fontWeight: 600 }}>Level</TableCell>
-              <TableCell width="15%" sx={{ fontWeight: 600 }}>Service</TableCell>
-              <TableCell width="45%" sx={{ fontWeight: 600 }}>Message</TableCell>
-              <TableCell width="15%" sx={{ fontWeight: 600 }}>Tags</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading && !logs.length ? (
-              <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                  <CircularProgress size={20} thickness={2} />
-                  <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-                    Loading logs...
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : logs.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    No logs found
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              logs.map((log) => (
-                <TableRow 
-                  key={log.id} 
-                  className={getLogLevelClass(log.level)}
+            
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography 
+                  variant="body2" 
+                  color="text.secondary"
+                  sx={{ mr: 1, fontSize: '0.75rem' }}
                 >
-                  <TableCell sx={{ fontSize: '0.75rem' }}>{formatTimestamp(log.timestamp)}</TableCell>
-                  <TableCell>
-                    <Box
-                      sx={{
-                        display: 'inline-block',
-                        px: 1,
-                        py: 0.25,
-                        fontSize: '0.625rem',
-                        fontWeight: 600,
-                        letterSpacing: '0.025em',
-                        borderRadius: '2px',
-                        textTransform: 'uppercase',
-                        backgroundColor: log.level === 'DEBUG' ? 'rgba(0, 0, 0, 0.05)' :
-                                         log.level === 'INFO' ? 'rgba(3, 105, 161, 0.08)' :
-                                         log.level === 'WARNING' ? 'rgba(217, 119, 6, 0.08)' :
-                                         log.level === 'ERROR' ? 'rgba(220, 38, 38, 0.08)' :
-                                         'rgba(185, 28, 28, 0.1)',
-                        color: log.level === 'DEBUG' ? '#525252' :
-                               log.level === 'INFO' ? '#0369A1' :
-                               log.level === 'WARNING' ? '#B45309' :
-                               log.level === 'ERROR' ? '#B91C1C' :
-                               '#7F1D1D',
-                      }}
-                    >
-                      {log.level}
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ fontSize: '0.75rem' }}>{log.service}</TableCell>
-                  <TableCell sx={{ fontSize: '0.75rem', fontFamily: 'ui-monospace, monospace' }}>{log.message}</TableCell>
-                  <TableCell>
-                    {log.tags && Object.keys(log.tags).length > 0 ? (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {Object.entries(log.tags).map(([key, value]) => (
-                          <Chip
-                            key={key}
-                            label={`${key}: ${value}`}
-                            size="small"
-                            variant="outlined"
-                            sx={{ 
-                              height: 20, 
-                              fontSize: '0.625rem',
-                              '& .MuiChip-label': { px: 0.75 } 
-                            }}
-                          />
-                        ))}
-                      </Box>
-                    ) : (
-                      <Typography variant="caption" color="text.disabled">
-                        —
-                      </Typography>
-                    )}
+                  Rows:
+                </Typography>
+                <Select
+                  value={pagination.pageSize}
+                  onChange={handlePageSizeChange}
+                  size="small"
+                  sx={{ 
+                    height: 28,
+                    fontSize: '0.75rem',
+                    '& .MuiSelect-select': {
+                      padding: '4px 8px',
+                      paddingRight: '24px',
+                    },
+                  }}
+                >
+                  <MenuItem value={10}>10</MenuItem>
+                  <MenuItem value={25}>25</MenuItem>
+                  <MenuItem value={50}>50</MenuItem>
+                  <MenuItem value={100}>100</MenuItem>
+                </Select>
+              </Box>
+              
+              <Pagination 
+                count={pagination.totalPages} 
+                page={pagination.currentPage}
+                onChange={handlePageChange}
+                color="primary"
+                size="small"
+                siblingCount={1}
+                boundaryCount={1}
+                disabled={loading}
+                sx={{
+                  '& .MuiPaginationItem-root': {
+                    minWidth: 28,
+                    height: 28,
+                  }
+                }}
+              />
+            </Box>
+          </Box>
+        )}
+        
+        <TableContainer>
+          <Table size="small">
+            <TableHead sx={{ 
+              position: 'sticky',
+              top: { xs: 176, md: 184 }, // Position below pagination
+              zIndex: 8,
+              backgroundColor: 'background.paper'
+            }}>
+              <TableRow>
+                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Time</TableCell>
+                <TableCell width="8%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Level</TableCell>
+                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Service</TableCell>
+                <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Message</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading && filteredLogs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 8 }}>
+                    <CircularProgress size={24} thickness={4} />
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                      Loading logs...
+                    </Typography>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      {/* Bottom pagination */}
-      {logs.length > 0 && pagination.totalPages > 1 && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-          <Pagination 
-            count={pagination.totalPages} 
-            page={pagination.currentPage}
-            onChange={handlePageChange}
-            color="primary"
-            size="small"
-            showFirstButton
-            showLastButton
-            disabled={loading}
-          />
-        </Box>
-      )}
-    </Paper>
+              ) : filteredLogs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} align="center" sx={{ py: 8 }}>
+                    <Box sx={{ opacity: 0.5 }}>
+                      <SearchIcon sx={{ fontSize: 48, mb: 2, opacity: 0.3 }} />
+                      <Typography variant="body1" sx={{ mb: 1, fontWeight: 500 }}>
+                        No logs found
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Try adjusting your search or filter criteria
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredLogs.map((log, index) => {
+                  const levelColor = LOG_LEVEL_COLORS[log.level] || LOG_LEVEL_COLORS.INFO;
+                  
+                  // Extract tags from message (example format: "[tag1][tag2] Actual message")
+                  const tagRegex = /\[([^\]]+)\]/g;
+                  const tags = [];
+                  let cleanMessage = log.message;
+                  let match;
+                  
+                  while ((match = tagRegex.exec(log.message)) !== null) {
+                    tags.push(match[1]);
+                    cleanMessage = cleanMessage.replace(match[0], '');
+                  }
+                  
+                  cleanMessage = cleanMessage.trim();
+                  
+                  return (
+                    <TableRow 
+                      key={log.id || index}
+                      className={`staggered-item ${getLogLevelClass(log.level)}`}
+                      hover
+                      sx={{
+                        '&:hover': {
+                          '& .log-actions': {
+                            opacity: 1,
+                          }
+                        }
+                      }}
+                    >
+                      <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                        {formatTimestamp(log.timestamp)}
+                      </TableCell>
+                      
+                      <TableCell>
+                        <Tooltip title={log.level} placement="top">
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              bgcolor: levelColor.light,
+                              width: 28,
+                              height: 24,
+                              borderRadius: 0.5,
+                              color: levelColor.icon,
+                            }}
+                          >
+                            <LogIcon level={log.level} sx={{ fontSize: 16 }} />
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
+                      
+                      <TableCell sx={{ fontSize: '0.75rem' }}>
+                        <Chip
+                          label={log.service}
+                          size="small"
+                          sx={{
+                            height: 20,
+                            fontSize: '0.75rem',
+                            backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                            fontWeight: 500,
+                          }}
+                        />
+                      </TableCell>
+                      
+                      <TableCell 
+                        sx={{ 
+                          fontSize: '0.75rem', 
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                          position: 'relative',
+                          pr: 6,
+                        }}
+                      >
+                        {tags.length > 0 && (
+                          <Box sx={{ display: 'flex', gap: 0.5, mb: 0.5, flexWrap: 'wrap' }}>
+                            {tags.map((tag, i) => (
+                              <Chip
+                                key={i}
+                                label={tag}
+                                size="small"
+                                sx={{
+                                  height: 18,
+                                  fontSize: '0.65rem',
+                                  backgroundColor: alpha(theme.palette.secondary.main, 0.08),
+                                  fontWeight: 500,
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        )}
+                        {cleanMessage}
+                        <Box 
+                          className="log-actions"
+                          sx={{
+                            position: 'absolute',
+                            right: 8,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            display: 'flex',
+                            opacity: 0,
+                            transition: 'opacity 0.2s',
+                          }}
+                        >
+                          <Tooltip title="Copy log text">
+                            <IconButton 
+                              size="small" 
+                              sx={{ p: 0.5 }}
+                              onClick={() => {
+                                navigator.clipboard.writeText(cleanMessage);
+                              }}
+                            >
+                              <ContentCopyIcon fontSize="inherit" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        
+        {filteredLogs.length > 0 && pagination.totalPages > 1 && (
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            p: 2,
+            backgroundColor: 'background.paper'
+          }}>
+            <Pagination 
+              count={pagination.totalPages} 
+              page={pagination.currentPage}
+              onChange={handlePageChange}
+              color="primary"
+              size="small"
+              showFirstButton
+              showLastButton
+              disabled={loading}
+            />
+          </Box>
+        )}
+      </Card>
+    </Stack>
   );
 };
 
