@@ -38,7 +38,7 @@ func (p *StorageProcessor) ProcessTrace(trace *models.Trace) error {
 }
 
 // QueryLogs queries logs from storage
-func (p *StorageProcessor) QueryLogs(query *models.QueryParams) ([]map[string]interface{}, error) {
+func (p *StorageProcessor) QueryLogs(query *models.QueryParams) (map[string]interface{}, error) {
 	// Delegate to the storage implementation
 	return p.storage.QueryLogs(query)
 }

@@ -255,4 +255,80 @@ Pulse follows a clean architecture pattern with:
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📝 License
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+# Pulse Dashboard React
+
+A modern React-based dashboard for monitoring logs, metrics, and traces.
+
+## Features
+
+- **Modern UI**: Built with React and Material-UI for a clean, responsive interface
+- **Real-time Updates**: Live streaming of logs, metrics, and traces
+- **Filtering**: Powerful filtering capabilities for all data types
+- **Pagination**: Efficient handling of large datasets
+- **Responsive Design**: Works on desktop and mobile devices
+
+## Tabs
+
+- **Overview**: Dashboard summary and quick access to key features
+- **Logs**: View and filter application logs in real-time
+- **Metrics**: Monitor application performance metrics
+- **Traces**: Analyze request traces across your distributed system
+- **Settings**: Configure dashboard preferences
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v14 or later)
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/karansingh/pulse.git
+   cd pulse/dashboard-react
+   ```
+
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+3. Start the development server:
+   ```
+   npm start
+   ```
+
+4. Open your browser and navigate to `http://localhost:3000`
+
+### Building for Production
+
+```
+npm run build
+```
+
+The build artifacts will be stored in the `dist/` directory.
+
+## Project Structure
+
+```
+dashboard-react/
+├── public/              # Static files
+├── src/                 # Source code
+│   ├── components/      # React components
+│   │   ├── pages/       # Page components
+│   ├── hooks/           # Custom React hooks
+│   ├── utils/           # Utility functions
+│   ├── contexts/        # React contexts
+│   ├── App.jsx          # Main App component
+│   └── index.js         # Entry point
+├── package.json         # Dependencies and scripts
+└── webpack.config.js    # Webpack configuration
+```
+
+## License
+
 This project is licensed under the MIT License - see the LICENSE file for details. 
