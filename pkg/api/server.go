@@ -70,6 +70,9 @@ func (s *Server) setupRoutes() {
 	s.routes["/api/services"] = s.apiServicesHandler()
 	s.routes["/api/stats"] = s.apiStatsHandler()
 
+	// Add new clear endpoint for cleaning data
+	s.routes["/api/clear"] = s.clearHandler()
+
 	// WebSocket endpoints
 	s.routes["/ws/logs"] = s.wsLogsHandler()
 	s.routes["/ws/metrics"] = s.wsMetricsHandler()

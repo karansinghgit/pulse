@@ -47,6 +47,7 @@ type Chain []Processor
 
 // ProcessLog processes a log entry through all processors in the chain
 func (c Chain) ProcessLog(log *models.LogEntry) error {
+	fmt.Println("Processing log:", log)
 	for _, processor := range c {
 		if err := processor.ProcessLog(log); err != nil {
 			return err

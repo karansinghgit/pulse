@@ -347,9 +347,10 @@ func (s *SQLiteStorage) QueryLogs(query *models.QueryParams) (map[string]interfa
 			"service":   service,
 			"level":     level,
 			"message":   message,
+			"tags":      make(map[string]string), // Initialize with empty map by default
 		}
 
-		// Add optional fields if present
+		// Add tags if present
 		if tags != nil && len(tags) > 0 {
 			logMap["tags"] = tags
 		}

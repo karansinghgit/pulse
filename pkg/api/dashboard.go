@@ -8,10 +8,22 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/karansingh/pulse/pkg/models"
+)
+
+// Shared counters for WebSocket streaming
+var (
+	// Mutex to protect shared counters
+	streamCountersMutex sync.Mutex
+
+	// Shared counters for streaming summary
+	logsStreamingCounter    int
+	metricsStreamingCounter int
+	tracesStreamingCounter  int
 )
 
 // QueryParams represents the parameters for querying data
@@ -54,7 +66,8 @@ func uuidMini() string {
 
 // parseQueryParams extracts query parameters from an HTTP request
 func parseQueryParams(r *http.Request) *models.QueryParams {
-	log.Printf("Parsing query parameters from request: %s", r.URL.String())
+	// Remove excessive logging
+	// log.Printf("Parsing query parameters from request: %s", r.URL.String())
 
 	// Parse query parameters
 	query := &models.QueryParams{
@@ -65,28 +78,28 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 	service := r.URL.Query().Get("service")
 	if service != "" {
 		query.Service = service
-		log.Printf("Filtering by service: %s", service)
+		// log.Printf("Filtering by service: %s", service)
 	}
 
 	// Get level filter (for logs)
 	level := r.URL.Query().Get("level")
 	if level != "" {
 		query.Level = level
-		log.Printf("Filtering by level: %s", level)
+		// log.Printf("Filtering by level: %s", level)
 	}
 
 	// Get trace ID filter
 	traceID := r.URL.Query().Get("trace_id")
 	if traceID != "" {
 		query.TraceID = traceID
-		log.Printf("Filtering by trace ID: %s", traceID)
+		// log.Printf("Filtering by trace ID: %s", traceID)
 	}
 
 	// Get search filter
 	search := r.URL.Query().Get("search")
 	if search != "" {
 		query.Search = search
-		log.Printf("Filtering by search term: %s", search)
+		// log.Printf("Filtering by search term: %s", search)
 	}
 
 	// Get limit
@@ -95,27 +108,27 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 		limit, err := strconv.Atoi(limitStr)
 		if err == nil && limit > 0 {
 			query.Limit = limit
-			log.Printf("Using limit: %d", limit)
+			// log.Printf("Using limit: %d", limit)
 		}
 	}
 
 	// Get time range
 	timeRange := r.URL.Query().Get("time_range")
 	if timeRange != "" {
-		log.Printf("Using time range: %s", timeRange)
+		// log.Printf("Using time range: %s", timeRange)
 
 		// Parse the time range (e.g., "1h", "30m", "1d")
 		duration, err := parseDuration(timeRange)
 		if err == nil {
 			query.Since = time.Now().Add(-duration)
-			log.Printf("Calculated since time: %s", query.Since)
+			// log.Printf("Calculated since time: %s", query.Since)
 		} else {
 			log.Printf("Error parsing time range: %v", err)
 		}
 	} else {
 		// Default to last hour if no time range specified
 		query.Since = time.Now().Add(-1 * time.Hour)
-		log.Printf("Using default time range (1h), since: %s", query.Since)
+		// log.Printf("Using default time range (1h), since: %s", query.Since)
 	}
 
 	// Get explicit since time
@@ -124,7 +137,7 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 		since, err := time.Parse(time.RFC3339, sinceStr)
 		if err == nil {
 			query.Since = since
-			log.Printf("Using explicit since time: %s", since)
+			// log.Printf("Using explicit since time: %s", since)
 		} else {
 			log.Printf("Error parsing since time: %v", err)
 		}
@@ -136,7 +149,7 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 		until, err := time.Parse(time.RFC3339, untilStr)
 		if err == nil {
 			query.Until = until
-			log.Printf("Using explicit until time: %s", until)
+			// log.Printf("Using explicit until time: %s", until)
 		} else {
 			log.Printf("Error parsing until time: %v", err)
 		}
@@ -146,14 +159,14 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 	orderBy := r.URL.Query().Get("order_by")
 	if orderBy != "" {
 		query.OrderBy = orderBy
-		log.Printf("Ordering by: %s", orderBy)
+		// log.Printf("Ordering by: %s", orderBy)
 	}
 
 	// Get order direction
 	orderDesc := r.URL.Query().Get("order_desc")
 	if orderDesc == "true" {
 		query.OrderDesc = true
-		log.Printf("Using descending order")
+		// log.Printf("Using descending order")
 	}
 
 	// Get offset for pagination
@@ -162,7 +175,7 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 		offset, err := strconv.Atoi(offsetStr)
 		if err == nil && offset >= 0 {
 			query.Offset = offset
-			log.Printf("Using offset: %d", offset)
+			// log.Printf("Using offset: %d", offset)
 		} else {
 			log.Printf("Error parsing offset: %v", err)
 		}
@@ -176,11 +189,11 @@ func parseQueryParams(r *http.Request) *models.QueryParams {
 				query.Filters = make(map[string]string)
 			}
 			query.Filters[filterName] = values[0]
-			log.Printf("Added filter %s: %s", filterName, values[0])
+			// log.Printf("Added filter %s: %s", filterName, values[0])
 		}
 	}
 
-	log.Printf("Final query parameters: %+v", query)
+	// log.Printf("Final query parameters: %+v", query)
 	return query
 }
 
@@ -419,49 +432,103 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	log.Printf("Starting log streaming with query: %+v", query)
+	// Set an absolute since time to avoid retrieving old logs
+	// This will only show logs created after the websocket connection was established
+	startTime := time.Now()
+	query.Since = startTime
 
 	// Read control messages from client
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
+				// Only log disconnections, not every error
+				if !strings.Contains(err.Error(), "websocket: close") {
+					log.Printf("WebSocket error: %v", err)
+				}
 				return // Connection closed or error
 			}
 		}
 	}()
 
+	// Set up a ticker for summary logs
+	summaryTicker := time.NewTicker(1 * time.Second)
+	defer summaryTicker.Stop()
+
+	// Track statistics for summary logging
+	var totalLogsSent int
+
+	// Send statistics periodically
+	go func() {
+		for {
+			select {
+			case <-summaryTicker.C:
+				if totalLogsSent > 0 {
+					log.Printf("Log streaming summary: Sent %d logs in the last second", totalLogsSent)
+					totalLogsSent = 0
+				}
+			}
+		}
+	}()
+
+	// Wait a short time before the initial query to avoid picking up any logs
+	// that might have been generated just before starting
+	time.Sleep(500 * time.Millisecond)
+
 	// Initial query
 	logs, err := s.processor.QueryLogs(query)
-	if err == nil {
-		log.Printf("Initial query returned %d logs", len(logs))
+	if err == nil && len(logs) > 0 {
 		message := WSMessage{
 			Type:    "logs",
 			Payload: logs,
 		}
 		if err := conn.WriteJSON(message); err != nil {
-			log.Printf("Error sending initial logs: %v", err)
 			return
 		}
-	} else {
-		log.Printf("Error in initial logs query: %v", err)
+
+		// Count logs sent for summary
+		totalLogsSent += len(logs)
+
+		// Update streaming counter
+		streamCountersMutex.Lock()
+		logsStreamingCounter += len(logs)
+		streamCountersMutex.Unlock()
+	} else if err != nil {
+		// Only log actual errors
+		log.Printf("Log query error: %v", err)
+		// Send an error message to the client
+		errMessage := WSMessage{
+			Type: "error",
+			Payload: map[string]string{
+				"message": fmt.Sprintf("Query error: %v", err),
+			},
+		}
+		conn.WriteJSON(errMessage)
 	}
+
+	// For updates, only look at logs from the last second
+	var lastQueryTime time.Time = time.Now()
 
 	// Send updates
 	for {
 		select {
 		case <-ticker.C:
-			// Update since time to get only new logs
-			query.Since = time.Now().Add(-2 * time.Second)
+			// Update since time to get only logs since our last query
+			query.Since = lastQueryTime
 			query.Until = time.Now()
+			lastQueryTime = query.Until
 
 			logs, err := s.processor.QueryLogs(query)
 			if err != nil {
-				log.Printf("Error streaming logs: %v", err)
+				errMessage := WSMessage{
+					Type: "error",
+					Payload: map[string]string{
+						"message": fmt.Sprintf("Query error: %v", err),
+					},
+				}
+				conn.WriteJSON(errMessage)
 				continue
 			}
-
-			log.Printf("Found %d new logs", len(logs))
 
 			if len(logs) > 0 {
 				message := WSMessage{
@@ -469,10 +536,16 @@ func (s *Server) streamLogs(conn *websocket.Conn, query *models.QueryParams) {
 					Payload: logs,
 				}
 				if err := conn.WriteJSON(message); err != nil {
-					log.Printf("Error sending logs: %v", err)
 					return
 				}
-				log.Printf("Sent %d logs to client", len(logs))
+
+				// Count logs sent for summary
+				totalLogsSent += len(logs)
+
+				// Update streaming counter
+				streamCountersMutex.Lock()
+				logsStreamingCounter += len(logs)
+				streamCountersMutex.Unlock()
 			}
 		}
 	}
@@ -483,49 +556,88 @@ func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	log.Printf("Starting metrics streaming with query: %+v", query)
+	// Set an absolute since time to avoid retrieving old metrics
+	startTime := time.Now()
+	query.Since = startTime
 
 	// Read control messages from client
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
+				// Only log disconnections, not every error
+				if !strings.Contains(err.Error(), "websocket: close") {
+					log.Printf("WebSocket error: %v", err)
+				}
 				return // Connection closed or error
+			}
+		}
+	}()
+
+	// Track statistics for summary logging
+	var totalMetricsSent int
+	summaryTicker := time.NewTicker(1 * time.Second)
+	defer summaryTicker.Stop()
+
+	// Send statistics periodically
+	go func() {
+		for {
+			select {
+			case <-summaryTicker.C:
+				if totalMetricsSent > 0 {
+					log.Printf("Metric streaming summary: Sent %d metrics in the last second", totalMetricsSent)
+					totalMetricsSent = 0
+				}
 			}
 		}
 	}()
 
 	// Initial query
 	metrics, err := s.processor.QueryMetrics(query)
-	if err == nil {
-		log.Printf("Initial query returned %d metrics", len(metrics))
+	if err == nil && len(metrics) > 0 {
 		message := WSMessage{
 			Type:    "metrics",
 			Payload: metrics,
 		}
 		if err := conn.WriteJSON(message); err != nil {
-			log.Printf("Error sending initial metrics: %v", err)
 			return
 		}
-	} else {
-		log.Printf("Error in initial metrics query: %v", err)
+
+		// Count metrics sent for summary
+		totalMetricsSent += len(metrics)
+
+		// Update metrics counter
+		streamCountersMutex.Lock()
+		metricsStreamingCounter += len(metrics)
+		streamCountersMutex.Unlock()
+	} else if err != nil {
+		// Only log actual errors
+		log.Printf("Metric query error: %v", err)
 	}
+
+	// For updates, only look at metrics from the last second
+	var lastQueryTime time.Time = time.Now()
 
 	// Send updates
 	for {
 		select {
 		case <-ticker.C:
-			// Update since time to get only new metrics
-			query.Since = time.Now().Add(-2 * time.Second)
+			// Update since time to get only metrics since our last query
+			query.Since = lastQueryTime
 			query.Until = time.Now()
+			lastQueryTime = query.Until
 
 			metrics, err := s.processor.QueryMetrics(query)
 			if err != nil {
-				log.Printf("Error streaming metrics: %v", err)
+				errMessage := WSMessage{
+					Type: "error",
+					Payload: map[string]string{
+						"message": fmt.Sprintf("Query error: %v", err),
+					},
+				}
+				conn.WriteJSON(errMessage)
 				continue
 			}
-
-			log.Printf("Found %d new metrics", len(metrics))
 
 			if len(metrics) > 0 {
 				message := WSMessage{
@@ -533,10 +645,16 @@ func (s *Server) streamMetrics(conn *websocket.Conn, query *models.QueryParams) 
 					Payload: metrics,
 				}
 				if err := conn.WriteJSON(message); err != nil {
-					log.Printf("Error sending metrics: %v", err)
 					return
 				}
-				log.Printf("Sent %d metrics to client", len(metrics))
+
+				// Count metrics sent for summary
+				totalMetricsSent += len(metrics)
+
+				// Update metrics counter
+				streamCountersMutex.Lock()
+				metricsStreamingCounter += len(metrics)
+				streamCountersMutex.Unlock()
 			}
 		}
 	}
@@ -547,37 +665,86 @@ func (s *Server) streamTraces(conn *websocket.Conn, query *models.QueryParams) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// Set an absolute since time to avoid retrieving old traces
+	startTime := time.Now()
+	query.Since = startTime
+
 	// Read control messages from client
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
+				// Only log disconnections, not every error
+				if !strings.Contains(err.Error(), "websocket: close") {
+					log.Printf("WebSocket error: %v", err)
+				}
 				return // Connection closed or error
+			}
+		}
+	}()
+
+	// Track statistics for summary logging
+	var totalTracesSent int
+	summaryTicker := time.NewTicker(1 * time.Second)
+	defer summaryTicker.Stop()
+
+	// Send statistics periodically
+	go func() {
+		for {
+			select {
+			case <-summaryTicker.C:
+				if totalTracesSent > 0 {
+					log.Printf("Trace streaming summary: Sent %d traces in the last second", totalTracesSent)
+					totalTracesSent = 0
+				}
 			}
 		}
 	}()
 
 	// Initial query
 	traces, err := s.processor.QueryTraces(query)
-	if err == nil {
+	if err == nil && len(traces) > 0 {
 		message := WSMessage{
 			Type:    "traces",
 			Payload: traces,
 		}
-		conn.WriteJSON(message)
+		if err := conn.WriteJSON(message); err != nil {
+			return
+		}
+
+		// Count traces sent for summary
+		totalTracesSent += len(traces)
+
+		// Update counter
+		streamCountersMutex.Lock()
+		tracesStreamingCounter += len(traces)
+		streamCountersMutex.Unlock()
+	} else if err != nil {
+		// Only log actual errors
+		log.Printf("Trace query error: %v", err)
 	}
+
+	// For updates, only look at traces from the last second
+	var lastQueryTime time.Time = time.Now()
 
 	// Send updates
 	for {
 		select {
 		case <-ticker.C:
-			// Update since time to get only new traces
-			query.Since = time.Now().Add(-2 * time.Second)
+			// Update since time to get only traces since our last query
+			query.Since = lastQueryTime
 			query.Until = time.Now()
+			lastQueryTime = query.Until
 
 			traces, err := s.processor.QueryTraces(query)
 			if err != nil {
-				log.Printf("Error streaming traces: %v", err)
+				errMessage := WSMessage{
+					Type: "error",
+					Payload: map[string]string{
+						"message": fmt.Sprintf("Query error: %v", err),
+					},
+				}
+				conn.WriteJSON(errMessage)
 				continue
 			}
 
@@ -587,10 +754,42 @@ func (s *Server) streamTraces(conn *websocket.Conn, query *models.QueryParams) {
 					Payload: traces,
 				}
 				if err := conn.WriteJSON(message); err != nil {
-					log.Printf("Error sending traces: %v", err)
 					return
 				}
+
+				// Count traces sent for summary
+				totalTracesSent += len(traces)
+
+				// Update counter
+				streamCountersMutex.Lock()
+				tracesStreamingCounter += len(traces)
+				streamCountersMutex.Unlock()
 			}
 		}
+	}
+}
+
+// clearHandler returns a handler for clearing all stored data
+func (s *Server) clearHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Log the clear operation
+		log.Println("Received request to clear all data")
+
+		// Reset counters
+		streamCountersMutex.Lock()
+		logsStreamingCounter = 0
+		metricsStreamingCounter = 0
+		tracesStreamingCounter = 0
+		streamCountersMutex.Unlock()
+
+		// Return success
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"All counters reset"}`))
 	}
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme, alpha } from '@mui/material/styles';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
@@ -125,6 +125,10 @@ const LogSelector = ({ value, onChange }) => {
 const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
   const theme = useTheme();
   
+  // Add ref for stable streaming indicator
+  const streamingIndicatorTimeout = useRef(null);
+  const [showStreamingIndicator, setShowStreamingIndicator] = useState(false);
+  
   // Filter state
   const [filters, setFilters] = useState({
     service: initialFilters.service || '',
@@ -148,6 +152,7 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
     loading,
     error,
     paused,
+    streaming,
     pagination,
     clearLogs,
     togglePause,
@@ -188,6 +193,27 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
     
     getServices();
   }, []);
+
+  // Update streaming indicator with debounce
+  useEffect(() => {
+    if (streamingIndicatorTimeout.current) {
+      clearTimeout(streamingIndicatorTimeout.current);
+    }
+    
+    if (streaming && !paused && pagination.currentPage === 1) {
+      streamingIndicatorTimeout.current = setTimeout(() => {
+        setShowStreamingIndicator(true);
+      }, 2000);
+    } else {
+      setShowStreamingIndicator(false);
+    }
+    
+    return () => {
+      if (streamingIndicatorTimeout.current) {
+        clearTimeout(streamingIndicatorTimeout.current);
+      }
+    };
+  }, [streaming, paused, pagination.currentPage]);
 
   const handlePageChange = (event, value) => {
     changePage(value);
@@ -266,18 +292,95 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
           </Typography>
         </Box>
         
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {showStreamingIndicator && (
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              color: 'success.main',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              minWidth: '80px',
+              transition: 'opacity 0.3s ease-in-out',
+              opacity: 1
+            }}>
+              <Box 
+                sx={{ 
+                  width: 8, 
+                  height: 8, 
+                  borderRadius: '50%', 
+                  bgcolor: 'success.main', 
+                  mr: 1,
+                  animation: 'pulse 2s infinite ease-in-out',
+                  '@keyframes pulse': {
+                    '0%': {
+                      opacity: 0.5,
+                      transform: 'scale(0.8)'
+                    },
+                    '50%': {
+                      opacity: 1,
+                      transform: 'scale(1)'
+                    },
+                    '100%': {
+                      opacity: 0.5,
+                      transform: 'scale(0.8)'
+                    }
+                  }
+                }}
+              />
+              Streaming
+            </Box>
+          )}
+          
+          {paused && pagination.currentPage === 1 && (
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              color: 'warning.main',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              minWidth: '210px',
+              transition: 'opacity 0.3s ease-in-out',
+              opacity: 1
+            }}>
+              <PauseIcon fontSize="small" sx={{ mr: 0.5 }} />
+              Paused (click resume to stream)
+            </Box>
+          )}
+          
+          {pagination.currentPage > 1 && (
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              color: 'warning.main',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              minWidth: '210px',
+            }}>
+              <PauseIcon fontSize="small" sx={{ mr: 0.5 }} />
+              Paused (page {pagination.currentPage})
+            </Box>
+          )}
+          
           <Tooltip title={paused ? "Resume live updates" : "Pause live updates"}>
-            <Button
-              startIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
-              variant="outlined"
-              color={paused ? "primary" : "inherit"}
-              onClick={togglePause}
+            <IconButton 
               size="small"
-              sx={{ borderRadius: 1 }}
+              onClick={togglePause}
+              color={paused ? "primary" : "default"}
+              disabled={pagination.currentPage > 1}
+              sx={{ 
+                borderRadius: 1,
+                ...(pagination.currentPage === 1 && !paused ? {
+                  bgcolor: 'rgba(0, 128, 0, 0.1)',
+                } : {}),
+                ...(pagination.currentPage > 1 ? {
+                  opacity: 0.5,
+                  cursor: 'not-allowed'
+                } : {})
+              }}
             >
-              {paused ? "Resume" : "Pause"}
-            </Button>
+              {paused ? <PlayArrowIcon fontSize="small" /> : <PauseIcon fontSize="small" />}
+            </IconButton>
           </Tooltip>
           
           <Tooltip title="Refresh logs">
@@ -428,13 +531,31 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
             top: { xs: 128, md: 136 }, // Position below filters
             zIndex: 9,
           }}>
-            <Typography 
-              variant="body2" 
-              color="text.secondary"
-              sx={{ fontSize: '0.75rem' }}
-            >
-              Showing {((pagination.currentPage - 1) * pagination.pageSize) + 1} - {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ fontSize: '0.75rem' }}
+              >
+                Showing {((pagination.currentPage - 1) * pagination.pageSize) + 1} - {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
+              </Typography>
+              
+              {showStreamingIndicator && (
+                <Chip
+                  label="Live"
+                  size="small"
+                  color="success"
+                  sx={{ 
+                    ml: 1,
+                    height: 20,
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    transition: 'opacity 0.3s ease-in-out',
+                    opacity: 1
+                  }}
+                />
+              )}
+            </Box>
             
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -485,19 +606,45 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
           </Box>
         )}
         
-        <TableContainer>
-          <Table size="small">
+        <TableContainer sx={{ 
+          height: 'calc(100vh - 180px)',
+          overflow: 'auto',
+          mb: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 1,
+          '&::-webkit-scrollbar': {
+            width: '8px',
+            height: '8px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: alpha(theme.palette.primary.main, 0.2),
+            borderRadius: '4px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'transparent',
+          }
+        }}>
+          <Table size="small" stickyHeader sx={{ 
+            tableLayout: 'fixed',
+            '& .MuiTableCell-root': {
+              py: 1.2, // Slightly taller rows for easier reading and scrolling
+              verticalAlign: 'top',
+            },
+          }}>
             <TableHead sx={{ 
               position: 'sticky',
-              top: { xs: 176, md: 184 }, // Position below pagination
+              top: 0,
               zIndex: 8,
-              backgroundColor: 'background.paper'
+              backgroundColor: 'background.paper',
+              borderBottom: '2px solid',
+              borderColor: 'divider'
             }}>
               <TableRow>
-                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Time</TableCell>
-                <TableCell width="8%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Level</TableCell>
-                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Service</TableCell>
-                <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>Message</TableCell>
+                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>TIME</TableCell>
+                <TableCell width="8%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>LEVEL</TableCell>
+                <TableCell width="15%" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>SERVICE</TableCell>
+                <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>MESSAGE</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

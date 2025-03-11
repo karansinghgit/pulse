@@ -6,7 +6,7 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: 8081,
     open: true,
     proxy: {
       // Proxy API requests to the backend server
@@ -15,6 +15,13 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path
+      },
+      // Add WebSocket proxy for streaming
+      '/ws': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+        ws: true // Enable WebSocket proxying
       }
     }
   },
