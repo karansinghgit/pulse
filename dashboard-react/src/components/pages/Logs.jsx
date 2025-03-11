@@ -49,6 +49,8 @@ import NewReleasesOutlinedIcon from '@mui/icons-material/NewReleasesOutlined';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 
+// Import the filter context hook
+import { useFilters } from '../../contexts/FilterContext';
 import useLogs from '../../hooks/useLogs';
 import { formatTimestamp, getLogLevelClass } from '../../utils/helpers';
 import { fetchServices } from '../../utils/api';
@@ -98,7 +100,7 @@ const LOG_LEVEL_COLORS = {
   },
 };
 
-// Log level filter changes
+// Update LogSelector to use filter context
 const LogSelector = ({ value, onChange }) => {
   return (
     <FormControl size="small" sx={{ minWidth: 120, flex: { sm: '0 0 auto' } }}>
@@ -122,22 +124,16 @@ const LogSelector = ({ value, onChange }) => {
   );
 };
 
-const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
+// Update the Logs component to use FilterContext
+const Logs = () => {
   const theme = useTheme();
+  const { filters, updateFilters } = useFilters();
   
   // Add ref for stable streaming indicator
   const streamingIndicatorTimeout = useRef(null);
   const [showStreamingIndicator, setShowStreamingIndicator] = useState(false);
   
-  // Filter state
-  const [filters, setFilters] = useState({
-    service: initialFilters.service || '',
-    logLevel: initialFilters.logLevel || '',
-    logSearch: initialFilters.logSearch || '',
-    timeRange: initialFilters.timeRange || '1h'
-  });
-  
-  // View state
+  // Local view state
   const [viewMode, setViewMode] = useState('all');
   
   // Services state
@@ -160,13 +156,6 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
     changePageSize,
     refresh
   } = useLogs(filters);
-
-  // Update parent filters if provided
-  useEffect(() => {
-    if (onFilterChange) {
-      onFilterChange(filters);
-    }
-  }, [filters, onFilterChange]);
 
   // Fetch available services on component mount
   useEffect(() => {
@@ -224,31 +213,22 @@ const Logs = ({ filters: initialFilters = {}, onFilterChange }) => {
     changePageSize(newSize);
   };
   
-  // Handle filter changes
+  // Update filter change handler to use the context's updateFilters
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
-    setFilters(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    updateFilters({ [name]: value });
   };
   
-  // Handle search submission
+  // Update search handler to use the context's updateFilters
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    setFilters(prev => ({
-      ...prev,
-      logSearch: searchInput
-    }));
+    updateFilters({ logSearch: searchInput });
   };
   
-  // Clear search
+  // Update clear search to use the context's updateFilters
   const handleClearSearch = () => {
     setSearchInput('');
-    setFilters(prev => ({
-      ...prev,
-      logSearch: ''
-    }));
+    updateFilters({ logSearch: '' });
   };
   
   // Filter logs for visualization

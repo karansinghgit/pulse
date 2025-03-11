@@ -141,6 +141,9 @@ const BASE_RECONNECT_DELAY = 2000; // Start with 2 seconds
 let lastReconnectTime = 0;
 const RECONNECT_COOLDOWN = 5000; // Minimum time between reconnects
 
+// Flag to enable mock data in development (set to false to use real API)
+const USE_MOCK_DATA = false;
+
 /**
  * Handles API errors and formats them consistently
  * @param {Response} response - Fetch Response object
@@ -344,6 +347,7 @@ export const fetchServices = async () => {
  * @returns {Promise} Promise resolving to metrics data
  */
 export const fetchMetrics = async (options = {}) => {
+  // Real API call
   try {
     const params = new URLSearchParams();
     
@@ -661,4 +665,13 @@ setTimeout(() => {
       // Ignore errors on initial ping
     }
   }
-}, 1000); 
+}, 1000);
+
+// Remove the metrics stream functionality 
+export const createMetricsStream = () => {
+  console.warn('Metrics streaming has been disabled in this version');
+  return {
+    close: () => {},
+    setPaused: () => {}
+  };
+}; 

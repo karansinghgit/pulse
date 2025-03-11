@@ -181,7 +181,7 @@ func sendLog(logEntry *models.LogEntry) error {
 
 // Simulate an HTTP request with tracing, metrics, and logs
 // Returns the count of logs, metrics, and traces generated
-func simulateRequest() (int, int, int) {
+func simulateRequest(metricsFocus bool) (int, int, int) {
 	// Metrics counter to track actual metrics generated
 	var logCount int
 	var metricCount int
@@ -191,6 +191,171 @@ func simulateRequest() (int, int, int) {
 	service := services[rand.Intn(len(services))]
 	endpoint := endpoints[rand.Intn(len(endpoints))]
 
+	// When metrics-focus is enabled, generate multiple metrics
+	if metricsFocus {
+		// Generate 3-6 different metrics per request
+		numMetrics := rand.Intn(4) + 3
+
+		for i := 0; i < numMetrics; i++ {
+			// Create a metric
+			metricName := ""
+			metricValue := 0.0
+			metricType := "gauge"
+
+			// Choose metric type and name based on category
+			metricCategory := rand.Intn(5)
+
+			switch metricCategory {
+			case 0: // Performance metrics
+				metricType = "gauge"
+				performanceMetrics := []string{
+					"http.request.latency",
+					"api.response.time",
+					"throughput.requests_per_second",
+					"concurrency.active_requests",
+					"request.duration",
+				}
+				metricName = performanceMetrics[rand.Intn(len(performanceMetrics))]
+				metricValue = rand.Float64() * 500 // 0-500ms
+
+			case 1: // Error metrics
+				metricType = "counter"
+				errorMetrics := []string{
+					"errors.total",
+					"errors.5xx_count",
+					"errors.4xx_count",
+					"retry.attempts",
+					"timeout.count",
+				}
+				metricName = errorMetrics[rand.Intn(len(errorMetrics))]
+				metricValue = float64(rand.Intn(10))
+
+			case 2: // Resource metrics
+				metricType = "gauge"
+				resourceMetrics := []string{
+					"cpu.usage.percent",
+					"memory.usage.bytes",
+					"disk.io.ops",
+					"network.bandwidth",
+					"heap.size",
+				}
+				metricName = resourceMetrics[rand.Intn(len(resourceMetrics))]
+				if metricName == "memory.usage.bytes" {
+					metricValue = rand.Float64() * 1024 * 1024 * 100 // 0-100MB
+				} else {
+					metricValue = rand.Float64() * 100 // 0-100%
+				}
+
+			case 3: // Dependency metrics
+				metricType = "gauge"
+				dependencyMetrics := []string{
+					"database.query.time",
+					"database.connections",
+					"api.external.latency",
+					"queue.length",
+					"cache.hit_rate",
+				}
+				metricName = dependencyMetrics[rand.Intn(len(dependencyMetrics))]
+				if metricName == "database.query.time" || metricName == "api.external.latency" {
+					metricValue = rand.Float64() * 200 // 0-200ms
+				} else {
+					metricValue = rand.Float64() * 50 // 0-50
+				}
+
+			case 4: // Business metrics
+				metricType = "counter"
+				businessMetrics := []string{
+					"user.logins",
+					"transactions.completed",
+					"orders.processed",
+					"checkout.success_rate",
+					"active.users",
+				}
+				metricName = businessMetrics[rand.Intn(len(businessMetrics))]
+				metricValue = float64(rand.Intn(100) + 1)
+			}
+
+			// Create the metric
+			metric := &models.Metric{
+				ID:        models.GenerateID(),
+				Name:      metricName,
+				Value:     metricValue,
+				Type:      models.MetricType(metricType),
+				Service:   service,
+				Timestamp: time.Now(),
+				Tags: map[string]string{
+					"endpoint": endpoint,
+					"env":      "demo",
+					"region":   "us-west",
+				},
+			}
+
+			// Send the metric
+			if err := sendMetric(metric); err != nil {
+				log.Printf("Error sending metric: %v", err)
+			} else {
+				metricCount++
+			}
+		}
+
+		// Add minimal logging and tracing in metrics-focus mode
+		if rand.Float32() < 0.2 { // Only 20% chance to create logs/traces
+			// Create a trace for this request
+			trace, rootSpan := models.NewTrace("http_request", service)
+			rootSpan.AddTag("endpoint", endpoint)
+			rootSpan.AddTag("http.method", "GET")
+			rootSpan.AddTag("http.url", endpoint)
+
+			// Simulate request duration
+			requestDuration := randomDuration(50, 500)
+			rootSpan.Finish()
+
+			// Create a status code
+			statusCode := randomStatusCode()
+			rootSpan.AddTag("http.status_code", fmt.Sprintf("%d", statusCode))
+
+			// Send the trace
+			if err := sendTrace(trace); err != nil {
+				log.Printf("Error sending trace: %v", err)
+			} else {
+				traceCount++
+			}
+
+			// Create a log entry for this request
+			logLevel := models.LogLevelInfo
+			if statusCode >= 400 {
+				logLevel = models.LogLevelError
+			}
+
+			// Create the log entry
+			logEntry := &models.LogEntry{
+				ID:        models.GenerateID(),
+				Message:   fmt.Sprintf("HTTP %s %s - %d", "GET", endpoint, statusCode),
+				Level:     logLevel,
+				Service:   service,
+				Timestamp: time.Now(),
+				TraceID:   trace.ID,
+				SpanID:    rootSpan.ID,
+				Tags: map[string]string{
+					"endpoint":         endpoint,
+					"http.method":      "GET",
+					"http.status":      fmt.Sprintf("%d", statusCode),
+					"request.duration": fmt.Sprintf("%dms", requestDuration.Milliseconds()),
+				},
+			}
+
+			// Send the log
+			if err := sendLog(logEntry); err != nil {
+				log.Printf("Error sending log: %v", err)
+			} else {
+				logCount++
+			}
+		}
+
+		return logCount, metricCount, traceCount
+	}
+
+	// Standard simulation code for non-metrics focus
 	// Create a trace for this request
 	trace, rootSpan := models.NewTrace("http_request", service)
 	rootSpan.AddTag("endpoint", endpoint)
@@ -486,14 +651,21 @@ func clearOldLogs() error {
 
 func main() {
 	// Parse command line flags
-	var port int
+	var rate int
+	var duration int
+	var skipServer bool
 	var openBrowser bool
-	flag.IntVar(&port, "port", 8080, "Port to run the Pulse server on")
+	var metricsFocus bool
+
+	flag.IntVar(&rate, "rate", 10, "Number of requests per second to simulate")
+	flag.IntVar(&duration, "duration", 120, "Duration of the simulation in seconds (0 = run indefinitely)")
+	flag.BoolVar(&skipServer, "skip-server", false, "Skip starting the Pulse server")
 	flag.BoolVar(&openBrowser, "open", true, "Automatically open the dashboard in a browser")
+	flag.BoolVar(&metricsFocus, "metrics-focus", false, "Focus on generating metrics data (for metrics dashboard demo)")
 	flag.Parse()
 
 	// Set server URL based on port
-	pulseServerURL = fmt.Sprintf("http://localhost:%d", port)
+	pulseServerURL = fmt.Sprintf("http://localhost:%d", 8080)
 
 	// Create a context that can be canceled
 	ctx, cancel := context.WithCancel(context.Background())
@@ -517,9 +689,11 @@ func main() {
 	// Start the Pulse server
 	var pulseCmd *exec.Cmd
 	var err error
-	pulseCmd, err = startPulseServer()
-	if err != nil {
-		log.Fatalf("Failed to start Pulse server: %v", err)
+	if !skipServer {
+		pulseCmd, err = startPulseServer()
+		if err != nil {
+			log.Fatalf("Failed to start Pulse server: %v", err)
+		}
 	}
 
 	// Ensure server is killed on exit
@@ -590,7 +764,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				// Generate a random request and get counts
-				logCounter, metricCounter, traceCounter := simulateRequest()
+				logCounter, metricCounter, traceCounter := simulateRequest(metricsFocus)
 
 				// Update the ticker duration randomly to create varied traffic patterns
 				newInterval := time.Duration(rand.Intn(800)+200) * time.Millisecond
